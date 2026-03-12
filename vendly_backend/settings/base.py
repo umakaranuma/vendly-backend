@@ -55,14 +55,11 @@ WSGI_APPLICATION = 'vendly_backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT'),
-        'NAME': os.getenv('DB_DATABASE'),
-        'USER': os.getenv('DB_USERNAME'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-        },
+        'NAME': os.getenv("DB_DATABASE"),
+        'USER': os.getenv("DB_USERNAME"),
+        'PASSWORD': os.getenv("DB_PASSWORD"),
+        'HOST': os.getenv("DB_HOST"),
+        'PORT': os.getenv("DB_PORT"), 
     }
 }
 

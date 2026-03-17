@@ -10,7 +10,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from vendly_backend.models import CoreRole, CoreUser, VendorProfile
+from vendly_backend.models import CoreRole, CoreUser, Vendor
 
 
 def _build_tokens_for_user(user: CoreUser) -> dict:
@@ -102,15 +102,8 @@ def register_vendor(request: Request) -> Response:
     first_name = data.get("first_name", "")
     last_name = data.get("last_name", "")
 
-    store_name = data.get("store_name")
-    business_name = data.get("business_name", "")
-    address = data.get("address", "")
+    name = data.get("store_name") or data.get("name") # support legacy clients
     city = data.get("city", "")
-    state = data.get("state", "")
-    country = data.get("country", "")
-    postal_code = data.get("postal_code", "")
-    contact_email = data.get("contact_email", "")
-    contact_phone = data.get("contact_phone", "")
 
     if not email and not phone:
         return ResponseService.response(
@@ -128,10 +121,10 @@ def register_vendor(request: Request) -> Response:
             status.HTTP_400_BAD_REQUEST,
         )
 
-    if not store_name:
+    if not name:
         return ResponseService.response(
             "BAD_REQUEST",
-            {"detail": "Store name is required."},
+            {"detail": "Name is required."},
             "Validation failed.",
             status.HTTP_400_BAD_REQUEST,
         )
@@ -163,17 +156,11 @@ def register_vendor(request: Request) -> Response:
             role=role,
         )
 
-        VendorProfile.objects.create(
+        Vendor.objects.create(
             user=user,
-            store_name=store_name,
-            business_name=business_name,
-            address=address,
+            name=name,
             city=city,
-            state=state,
-            country=country,
-            postal_code=postal_code,
-            contact_email=contact_email,
-            contact_phone=contact_phone,
+            status="pending"
         )
 
     tokens = _build_tokens_for_user(user)

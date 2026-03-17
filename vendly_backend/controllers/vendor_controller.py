@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from vendly_backend.models import VendorProfile
+from vendly_backend.models import Vendor
 from vendly_backend.permissions import IsVendor
 
 
@@ -16,8 +16,8 @@ from vendly_backend.permissions import IsVendor
 def vendor_profile_view(request: Request) -> Response:
     user = request.user
     try:
-        profile = user.vendor_profile  # type: ignore[attr-defined]
-    except VendorProfile.DoesNotExist:
+        profile = user.vendor  # type: ignore[attr-defined]
+    except Vendor.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
             {},
@@ -29,17 +29,10 @@ def vendor_profile_view(request: Request) -> Response:
         data = request.data
         # Allow updating a subset of profile fields
         for field in [
-            "store_name",
-            "business_name",
-            "address",
+            "name",
             "city",
-            "state",
-            "country",
-            "postal_code",
-            "latitude",
-            "longitude",
-            "contact_email",
-            "contact_phone",
+            "bio",
+            "price_from",
         ]:
             if field in data:
                 setattr(profile, field, data.get(field))
@@ -50,20 +43,14 @@ def vendor_profile_view(request: Request) -> Response:
 
     payload = {
         "id": profile.id,
-        "store_name": profile.store_name,
-        "business_name": profile.business_name,
-        "address": profile.address,
+        "name": profile.name,
         "city": profile.city,
-        "state": profile.state,
-        "country": profile.country,
-        "postal_code": profile.postal_code,
-        "latitude": str(profile.latitude) if profile.latitude is not None else None,
-        "longitude": str(profile.longitude) if profile.longitude is not None else None,
-        "contact_email": profile.contact_email,
-        "contact_phone": profile.contact_phone,
-        "is_approved": profile.is_approved,
-        "is_blocked": profile.is_blocked,
-        "rejection_reason": profile.rejection_reason,
+        "category_id": profile.category_id,
+        "rating": float(profile.rating) if profile.rating is not None else 0.0,
+        "review_count": profile.review_count,
+        "price_from": str(profile.price_from) if profile.price_from is not None else None,
+        "bio": profile.bio,
+        "status": profile.status,
     }
 
     return ResponseService.response(

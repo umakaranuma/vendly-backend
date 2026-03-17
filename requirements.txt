@@ -3,4 +3,5 @@ djangorestframework>=3.14
 djangorestframework-simplejwt>=5.3
 requests>=2.31
 mServices
+python-dotenv>=1.0
 

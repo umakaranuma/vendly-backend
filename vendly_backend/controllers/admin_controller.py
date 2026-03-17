@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from vendly_backend.models import CoreRole, CoreUser, VendorProfile
+from vendly_backend.models import CoreRole, CoreUser, Vendor
 from vendly_backend.permissions import IsAdmin
 
 
@@ -204,26 +204,20 @@ def unblock_user(request: Request, user_id: int) -> Response:
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_vendors(request: Request) -> Response:
-    vendors = VendorProfile.objects.select_related("user", "user__role")
+    vendors = Vendor.objects.select_related("user", "user__role")
     data = []
     for v in vendors:
         data.append(
             {
                 "id": v.id,
-                "store_name": v.store_name,
-                "business_name": v.business_name,
-                "address": v.address,
+                "name": v.name,
                 "city": v.city,
-                "state": v.state,
-                "country": v.country,
-                "postal_code": v.postal_code,
-                "latitude": str(v.latitude) if v.latitude is not None else None,
-                "longitude": str(v.longitude) if v.longitude is not None else None,
-                "contact_email": v.contact_email,
-                "contact_phone": v.contact_phone,
-                "is_approved": v.is_approved,
-                "is_blocked": v.is_blocked,
-                "rejection_reason": v.rejection_reason,
+                "category_id": v.category_id,
+                "rating": float(v.rating) if v.rating is not None else 0.0,
+                "review_count": v.review_count,
+                "price_from": str(v.price_from) if v.price_from is not None else None,
+                "bio": v.bio,
+                "status": v.status,
             }
         )
 
@@ -239,8 +233,8 @@ def list_vendors(request: Request) -> Response:
 @permission_classes([IsAuthenticated, IsAdmin])
 def retrieve_vendor(request: Request, vendor_id: int) -> Response:
     try:
-        vendor = VendorProfile.objects.select_related("user", "user__role").get(pk=vendor_id)
-    except VendorProfile.DoesNotExist:
+        vendor = Vendor.objects.select_related("user", "user__role").get(pk=vendor_id)
+    except Vendor.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
             {},
@@ -250,20 +244,14 @@ def retrieve_vendor(request: Request, vendor_id: int) -> Response:
 
     data = {
         "id": vendor.id,
-        "store_name": vendor.store_name,
-        "business_name": vendor.business_name,
-        "address": vendor.address,
+        "name": vendor.name,
         "city": vendor.city,
-        "state": vendor.state,
-        "country": vendor.country,
-        "postal_code": vendor.postal_code,
-        "latitude": str(vendor.latitude) if vendor.latitude is not None else None,
-        "longitude": str(vendor.longitude) if vendor.longitude is not None else None,
-        "contact_email": vendor.contact_email,
-        "contact_phone": vendor.contact_phone,
-        "is_approved": vendor.is_approved,
-        "is_blocked": vendor.is_blocked,
-        "rejection_reason": vendor.rejection_reason,
+        "category_id": vendor.category_id,
+        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+        "review_count": vendor.review_count,
+        "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+        "bio": vendor.bio,
+        "status": vendor.status,
     }
 
     return ResponseService.response(
@@ -278,8 +266,8 @@ def retrieve_vendor(request: Request, vendor_id: int) -> Response:
 @permission_classes([IsAuthenticated, IsAdmin])
 def approve_vendor(request: Request, vendor_id: int) -> Response:
     try:
-        vendor = VendorProfile.objects.get(pk=vendor_id)
-    except VendorProfile.DoesNotExist:
+        vendor = Vendor.objects.get(pk=vendor_id)
+    except Vendor.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
             {},
@@ -287,27 +275,19 @@ def approve_vendor(request: Request, vendor_id: int) -> Response:
             status.HTTP_404_NOT_FOUND,
         )
 
-    vendor.is_approved = True
-    vendor.is_blocked = False
-    vendor.rejection_reason = ""
-    vendor.save(update_fields=["is_approved", "is_blocked", "rejection_reason"])
+    vendor.status = "approved"
+    vendor.save(update_fields=["status"])
 
     data = {
         "id": vendor.id,
-        "store_name": vendor.store_name,
-        "business_name": vendor.business_name,
-        "address": vendor.address,
+        "name": vendor.name,
         "city": vendor.city,
-        "state": vendor.state,
-        "country": vendor.country,
-        "postal_code": vendor.postal_code,
-        "latitude": str(vendor.latitude) if vendor.latitude is not None else None,
-        "longitude": str(vendor.longitude) if vendor.longitude is not None else None,
-        "contact_email": vendor.contact_email,
-        "contact_phone": vendor.contact_phone,
-        "is_approved": vendor.is_approved,
-        "is_blocked": vendor.is_blocked,
-        "rejection_reason": vendor.rejection_reason,
+        "category_id": vendor.category_id,
+        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+        "review_count": vendor.review_count,
+        "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+        "bio": vendor.bio,
+        "status": vendor.status,
     }
 
     return ResponseService.response(
@@ -322,8 +302,8 @@ def approve_vendor(request: Request, vendor_id: int) -> Response:
 @permission_classes([IsAuthenticated, IsAdmin])
 def reject_vendor(request: Request, vendor_id: int) -> Response:
     try:
-        vendor = VendorProfile.objects.get(pk=vendor_id)
-    except VendorProfile.DoesNotExist:
+        vendor = Vendor.objects.get(pk=vendor_id)
+    except Vendor.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
             {},
@@ -331,28 +311,20 @@ def reject_vendor(request: Request, vendor_id: int) -> Response:
             status.HTTP_404_NOT_FOUND,
         )
 
-    reason = request.data.get("reason", "")
-    vendor.is_approved = False
-    vendor.is_blocked = True
-    vendor.rejection_reason = reason
-    vendor.save(update_fields=["is_approved", "is_blocked", "rejection_reason"])
+    # Note: reason is not stored if there is no rejection_reason column in new Vendor.
+    vendor.status = "rejected"
+    vendor.save(update_fields=["status"])
 
     data = {
         "id": vendor.id,
-        "store_name": vendor.store_name,
-        "business_name": vendor.business_name,
-        "address": vendor.address,
+        "name": vendor.name,
         "city": vendor.city,
-        "state": vendor.state,
-        "country": vendor.country,
-        "postal_code": vendor.postal_code,
-        "latitude": str(vendor.latitude) if vendor.latitude is not None else None,
-        "longitude": str(vendor.longitude) if vendor.longitude is not None else None,
-        "contact_email": vendor.contact_email,
-        "contact_phone": vendor.contact_phone,
-        "is_approved": vendor.is_approved,
-        "is_blocked": vendor.is_blocked,
-        "rejection_reason": vendor.rejection_reason,
+        "category_id": vendor.category_id,
+        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+        "review_count": vendor.review_count,
+        "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+        "bio": vendor.bio,
+        "status": vendor.status,
     }
 
     return ResponseService.response(

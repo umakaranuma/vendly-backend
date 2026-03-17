@@ -18,44 +18,107 @@ from django.contrib import admin
 from django.urls import path
 
 from vendly_backend.controllers.admin_controller import (
-    approve_vendor,
-    block_user,
-    list_users,
-    list_vendors,
-    reject_vendor,
-    retrieve_user,
-    retrieve_vendor,
-    unblock_user,
-    update_user,
+    approve_vendor, block_user, list_users, list_vendors, reject_vendor,
+    retrieve_user, retrieve_vendor, unblock_user, update_user,
 )
 from vendly_backend.controllers.auth_controller import (
-    login_view,
-    logout_view,
-    me_view,
-    register_customer,
-    register_vendor,
+    login_view, logout_view, me_view, register_customer, register_vendor,
 )
 from vendly_backend.controllers.vendor_controller import vendor_profile_view
+from vendly_backend.controllers.feed_controller import list_posts, post_like, post_comments, comment_like
+from vendly_backend.controllers.bookings_controller import bookings_list_view, booking_detail_view
+from vendly_backend.controllers.reviews_controller import vendor_reviews_view
+from vendly_backend.controllers.messaging_controller import conversations_view, conversation_detail_view, messages_view, read_messages_view
+from vendly_backend.controllers.invitations_controller import invitation_templates_view, invitations_view, invitation_detail_view
+from vendly_backend.controllers.categories_controller import categories_list_view, category_detail_view
+from vendly_backend.controllers.favorites_controller import favorites_list_view, favorite_vendor_view
+from vendly_backend.controllers.vendor_listings_controller import vendor_listings_view, vendor_listing_detail_view
+from vendly_backend.controllers.vendor_posts_controller import vendor_posts_view, vendor_post_detail_view
+from vendly_backend.controllers.vendor_packages_controller import vendor_packages_view, vendor_package_detail_view, vendor_public_packages_view
+from vendly_backend.controllers.vendor_subscriptions_controller import vendor_subscription_view, subscription_plans_view
+from vendly_backend.controllers.vendor_analytics_controller import vendor_analytics_view
+from vendly_backend.controllers.notifications_controller import notifications_view, read_notification_view, notification_settings_view
+from vendly_backend.controllers.file_upload_controller import file_upload_view
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     # Auth
-    path("api/auth/register/customer/", register_customer, name="register_customer"),
-    path("api/auth/register/vendor/", register_vendor, name="register_vendor"),
-    path("api/auth/login/", login_view, name="login"),
-    path("api/auth/me/", me_view, name="me"),
-    path("api/auth/logout/", logout_view, name="logout"),
-    # Vendor self-service
-    path("api/vendor/profile/", vendor_profile_view, name="vendor_profile"),
+    path("api/auth/register/customer", register_customer, name="register_customer"),
+    path("api/auth/register/vendor", register_vendor, name="register_vendor"),
+    path("api/auth/login", login_view, name="login"),
+    path("api/users/me", me_view, name="me"),
+    path("api/auth/logout", logout_view, name="logout"),
+    
+    # Profile / Vendor Self-Service
+    path("api/vendor/profile", vendor_profile_view, name="vendor_profile"),
+
+    # Feed & Comments
+    path("api/feed/posts", list_posts),
+    path("api/feed/posts/<int:post_id>/like", post_like),
+    path("api/feed/posts/<int:post_id>/comments", post_comments),
+    path("api/feed/comments/<int:comment_id>/like", comment_like),
+
+    # Search & Categories
+    path("api/categories", categories_list_view),
+    path("api/categories/<int:category_id>", category_detail_view),
+    
+    # Favorites
+    path("api/users/me/favorites", favorites_list_view),
+    path("api/vendors/<int:vendor_id>/favorite", favorite_vendor_view),
+
+    # Bookings
+    path("api/bookings", bookings_list_view),
+    path("api/bookings/<int:booking_id>", booking_detail_view),
+
+    # Reviews
+    path("api/vendors/<int:vendor_id>/reviews", vendor_reviews_view),
+
+    # Messaging
+    path("api/conversations", conversations_view),
+    path("api/conversations/<int:conversation_id>", conversation_detail_view),
+    path("api/conversations/<int:conversation_id>/messages", messages_view),
+    path("api/conversations/<int:conversation_id>/read", read_messages_view),
+
+    # Invitations
+    path("api/invitations/templates", invitation_templates_view),
+    path("api/invitations", invitations_view),
+    path("api/invitations/<int:invitation_id>", invitation_detail_view),
+
+    # Vendor - Listings (self)
+    path("api/vendor/listings", vendor_listings_view),
+    path("api/vendor/listings/<int:listing_id>", vendor_listing_detail_view),
+
+    # Vendor - Posts (self)
+    path("api/vendor/posts", vendor_posts_view),
+    path("api/vendor/posts/<int:post_id>", vendor_post_detail_view),
+
+    # Vendor - Packages & Subs (Public + Self)
+    path("api/vendors/<int:vendor_id>/packages", vendor_public_packages_view),  # public by vendor_id
+    path("api/vendor/packages", vendor_packages_view),                          # self (logged-in vendor)
+    path("api/vendor/packages/<int:package_id>", vendor_package_detail_view),   # self (logged-in vendor)
+    path("api/vendor/subscription", vendor_subscription_view),                  # self (logged-in vendor)
+    path("api/subscription/plans", subscription_plans_view),
+
+    # Vendor - Analytics (self)
+    path("api/vendor/analytics", vendor_analytics_view),
+
+    # Notifications
+    path("api/users/me/notifications", notifications_view),
+    path("api/users/me/notifications/<int:notification_id>/read", read_notification_view),
+    path("api/users/me/notification-settings", notification_settings_view),
+
+    # File Upload
+    path("api/upload-file", file_upload_view),
+    
     # Admin: users
-    path("api/admin/users/", list_users, name="admin_list_users"),
-    path("api/admin/users/<int:user_id>/", retrieve_user, name="admin_retrieve_user"),
-    path("api/admin/users/<int:user_id>/update/", update_user, name="admin_update_user"),
-    path("api/admin/users/<int:user_id>/block/", block_user, name="admin_block_user"),
-    path("api/admin/users/<int:user_id>/unblock/", unblock_user, name="admin_unblock_user"),
+    path("api/admin/users", list_users, name="admin_list_users"),
+    path("api/admin/users/<int:user_id>", retrieve_user, name="admin_retrieve_user"),
+    path("api/admin/users/<int:user_id>/update", update_user, name="admin_update_user"),
+    path("api/admin/users/<int:user_id>/block", block_user, name="admin_block_user"),
+    path("api/admin/users/<int:user_id>/unblock", unblock_user, name="admin_unblock_user"),
     # Admin: vendors
-    path("api/admin/vendors/", list_vendors, name="admin_list_vendors"),
-    path("api/admin/vendors/<int:vendor_id>/", retrieve_vendor, name="admin_retrieve_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/approve/", approve_vendor, name="admin_approve_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/reject/", reject_vendor, name="admin_reject_vendor"),
+    path("api/admin/vendors", list_vendors, name="admin_list_vendors"),
+    path("api/admin/vendors/<int:vendor_id>", retrieve_vendor, name="admin_retrieve_vendor"),
+    path("api/admin/vendors/<int:vendor_id>/approve", approve_vendor, name="admin_approve_vendor"),
+    path("api/admin/vendors/<int:vendor_id>/reject", reject_vendor, name="admin_reject_vendor"),
 ]

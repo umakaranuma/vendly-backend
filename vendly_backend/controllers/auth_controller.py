@@ -3,6 +3,7 @@ from __future__ import annotations
 import mServices.ResponseService as ResponseService
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
+from mServices.ValidatorService import ValidatorService
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -31,35 +32,42 @@ def register_customer(request: Request) -> Response:
     first_name = data.get("first_name", "")
     last_name = data.get("last_name", "")
 
-    if not email and not phone:
+    # Validate required fields via ValidatorService
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "email": "required|email",
+            "phone": "required",
+            "password": "required|min:6",
+            "first_name": "required",
+        },
+        custom_messages={
+            "password.required": "Password is required.",
+            "password.min": "Password must be at least 6 characters.",
+            "email.email": "Email must be a valid address.",
+            "email.required": "Email is required.",
+            "phone.required": "Phone is required.",
+            "first_name.required": "Name is required.",
+        },
+    )
+    if errors:
         return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Either email or phone is required."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
-        )
-
-    if not password or len(password) < 6:
-        return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Password must be at least 6 characters."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
+            "VALIDATION_ERROR",
+            errors,
+            "Validation Error",
         )
 
     if email and CoreUser.objects.filter(email=email).exists():
         return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Email already registered."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
+            "CONFLICT",
+            {"email": ["Email already registered."]},
+            "Validation Error",
         )
     if phone and CoreUser.objects.filter(phone=phone).exists():
         return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Phone already registered."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
+            "CONFLICT",
+            {"phone": ["Phone already registered."]},
+            "Validation Error",
         )
 
     role, _ = CoreRole.objects.get_or_create(name="CUSTOMER")
@@ -105,43 +113,45 @@ def register_vendor(request: Request) -> Response:
     name = data.get("store_name") or data.get("name") # support legacy clients
     city = data.get("city", "")
 
-    if not email and not phone:
-        return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Either email or phone is required."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
-        )
-
-    if not password or len(password) < 6:
-        return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Password must be at least 6 characters."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
-        )
-
+    # Validate required vendor fields via ValidatorService
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "email": "required|email",
+            "phone": "required",
+            "password": "required|min:6",
+        },
+        custom_messages={
+            "email.required": "Email is required.",
+            "email.email": "Email must be a valid address.",
+            "phone.required": "Phone is required.",
+            "password.required": "Password is required.",
+            "password.min": "Password must be at least 6 characters.",
+        },
+    )
+    # Validate name after resolving legacy store_name/name field
     if not name:
+        errors = errors or {}
+        errors.setdefault("name", []).append("Name is required.")
+
+    if errors:
         return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Name is required."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
+            "VALIDATION_ERROR",
+            errors,
+            "Validation Error",
         )
 
     if email and CoreUser.objects.filter(email=email).exists():
         return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Email already registered."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
+            "CONFLICT",
+            {"email": ["Email already registered."]},
+            "Validation Error",
         )
     if phone and CoreUser.objects.filter(phone=phone).exists():
         return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Phone already registered."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
+            "CONFLICT",
+            {"phone": ["Phone already registered."]},
+            "Validation Error",
         )
 
     role, _ = CoreRole.objects.get_or_create(name="VENDOR")
@@ -190,12 +200,26 @@ def login_view(request: Request) -> Response:
     phone = (data.get("phone") or "").strip() or None
     password = data.get("password") or ""
 
+    # Validate login input; password required, at least one of email/phone required
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "password": "required",
+        },
+        custom_messages={
+            "password.required": "Password is required.",
+        },
+    )
+
     if not email and not phone:
+        errors = errors or {}
+        errors.setdefault("contact", []).append("Either email or phone is required.")
+
+    if errors:
         return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Either email or phone is required."},
-            "Validation failed.",
-            status.HTTP_400_BAD_REQUEST,
+            "VALIDATION_ERROR",
+            errors,
+            "Validation Error",
         )
 
     user: CoreUser | None = None
@@ -261,6 +285,24 @@ def me_view(request: Request) -> Response:
 
     if request.method == "PATCH":
         data = request.data
+
+        # Validate updatable profile fields (all optional, but typed)
+        errors = ValidatorService.validate(
+            data,
+            rules={
+                "first_name": "nullable",
+                "last_name": "nullable",
+                "phone": "nullable",
+            },
+            custom_messages={},
+        )
+        if errors:
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                errors,
+                "Validation Error",
+            )
+
         # Only allow some fields to be updated
         for field in ["first_name", "last_name", "phone"]:
             if field in data:

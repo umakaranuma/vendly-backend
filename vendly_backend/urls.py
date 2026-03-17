@@ -84,23 +84,23 @@ urlpatterns = [
     path("api/invitations", invitations_view),
     path("api/invitations/<int:invitation_id>", invitation_detail_view),
 
-    # Vendor - Listings
-    path("api/vendors/me/listings", vendor_listings_view),
-    path("api/vendors/me/listings/<int:listing_id>", vendor_listing_detail_view),
+    # Vendor - Listings (self)
+    path("api/vendor/listings", vendor_listings_view),
+    path("api/vendor/listings/<int:listing_id>", vendor_listing_detail_view),
 
-    # Vendor - Posts
-    path("api/vendors/me/posts", vendor_posts_view),
-    path("api/vendors/me/posts/<int:post_id>", vendor_post_detail_view),
+    # Vendor - Posts (self)
+    path("api/vendor/posts", vendor_posts_view),
+    path("api/vendor/posts/<int:post_id>", vendor_post_detail_view),
 
-    # Vendor - Packages & Subs (Public + Private)
-    path("api/vendors/<int:vendor_id>/packages", vendor_public_packages_view),
-    path("api/vendors/me/packages", vendor_packages_view),
-    path("api/vendors/me/packages/<int:package_id>", vendor_package_detail_view),
-    path("api/vendors/me/subscription", vendor_subscription_view),
+    # Vendor - Packages & Subs (Public + Self)
+    path("api/vendors/<int:vendor_id>/packages", vendor_public_packages_view),  # public by vendor_id
+    path("api/vendor/packages", vendor_packages_view),                          # self (logged-in vendor)
+    path("api/vendor/packages/<int:package_id>", vendor_package_detail_view),   # self (logged-in vendor)
+    path("api/vendor/subscription", vendor_subscription_view),                  # self (logged-in vendor)
     path("api/subscription/plans", subscription_plans_view),
 
-    # Vendor - Analytics
-    path("api/vendors/me/analytics", vendor_analytics_view),
+    # Vendor - Analytics (self)
+    path("api/vendor/analytics", vendor_analytics_view),
 
     # Notifications
     path("api/users/me/notifications", notifications_view),

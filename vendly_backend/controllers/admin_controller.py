@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mServices.ResponseService as ResponseService
+from mServices.ValidatorService import ValidatorService
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -20,6 +21,31 @@ def _get_status_ref(entity_type: str, status_type: str, name: str):
         defaults={"entity_type": entity_type, "name": name, "sort_order": 10},
     )
     return status_ref
+
+
+def _serialize_user(user: CoreUser) -> dict:
+    role = user.role
+    role_payload = None
+    if role:
+        role_payload = {"id": role.id, "name": role.name, "description": role.description}
+
+    user_status = (
+        user.status_ref.name
+        if getattr(user, "status_ref", None)
+        else ("active" if user.is_active else "suspended")
+    )
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "phone": user.phone,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "is_active": user.is_active,
+        "is_verified": user.is_verified,
+        "status": user_status,
+        "role": role_payload,
+    }
 
 
 @api_view(["GET"])
@@ -42,26 +68,7 @@ def list_users(request: Request) -> Response:
 
     data = []
     for user in users:
-        role = user.role
-        role_payload = None
-        if role:
-            role_payload = {"id": role.id, "name": role.name, "description": role.description}
-        user_status = (
-            user.status_ref.name if getattr(user, "status_ref", None) else ("active" if user.is_active else "suspended")
-        )
-        data.append(
-            {
-                "id": user.id,
-                "email": user.email,
-                "phone": user.phone,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "is_active": user.is_active,
-                "is_verified": user.is_verified,
-                "status": user_status,
-                "role": role_payload,
-            }
-        )
+        data.append(_serialize_user(user))
 
     return ResponseService.response(
         "SUCCESS",
@@ -84,27 +91,165 @@ def retrieve_user(request: Request, user_id: int) -> Response:
             status.HTTP_404_NOT_FOUND,
         )
 
-    role = user.role
-    role_payload = None
-    if role:
-        role_payload = {"id": role.id, "name": role.name, "description": role.description}
-
-    data = {
-        "id": user.id,
-        "email": user.email,
-        "phone": user.phone,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_active": user.is_active,
-        "is_verified": user.is_verified,
-        "status": user.status_ref.name if getattr(user, "status_ref", None) else ("active" if user.is_active else "suspended"),
-        "role": role_payload,
-    }
+    data = _serialize_user(user)
 
     return ResponseService.response(
         "SUCCESS",
         data,
         "User fetched successfully.",
+        status.HTTP_200_OK,
+    )
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated])
+def users_view(request: Request) -> Response:
+    """
+    Unified user endpoint:
+    - Non-admin: allow only their own user via `?id=<their_id>` (or `id` omitted => returns themselves as a 1-item list).
+    - Admin: supports listing via `GET /api/users` and retrieving via `GET /api/users?id=<user_id>`.
+    """
+
+    is_admin = getattr(request.user.role, "name", "").upper() in {"ADMIN", "SUPER_ADMIN"}
+    user_id = request.GET.get("id")
+
+    if request.method == "PATCH":
+        # Profile update via the same endpoint, limited to the authenticated user's own record.
+        # (Admin full update remains on `/api/admin/users/<user_id>/update`.)
+        if user_id:
+            try:
+                target_id = int(user_id)
+            except (TypeError, ValueError):
+                return ResponseService.response(
+                    "VALIDATION_ERROR",
+                    {"id": ["Invalid id."]},
+                    "Validation Error",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            target_id = request.user.id
+
+        if target_id != request.user.id:
+            return ResponseService.response(
+                "FORBIDDEN",
+                {},
+                "You are not allowed to update this user.",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            target_user = CoreUser.objects.get(pk=target_id)
+        except CoreUser.DoesNotExist:
+            return ResponseService.response(
+                "NOT_FOUND",
+                {},
+                "User not found.",
+                status.HTTP_404_NOT_FOUND,
+            )
+
+        data = request.data
+        errors = ValidatorService.validate(
+            data,
+            rules={
+                "first_name": "nullable",
+                "last_name": "nullable",
+                "phone": "nullable",
+            },
+            custom_messages={},
+        )
+        if errors:
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                errors,
+                "Validation Error",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        changed_fields = []
+        for field in ["first_name", "last_name", "phone"]:
+            if field in data:
+                setattr(target_user, field, data.get(field))
+                changed_fields.append(field)
+
+        if changed_fields:
+            target_user.save(update_fields=changed_fields)
+        else:
+            target_user.save()
+
+        return ResponseService.response(
+            "SUCCESS",
+            _serialize_user(target_user),
+            "Profile updated successfully.",
+            status.HTTP_200_OK,
+        )
+
+    if user_id:
+        try:
+            target_id = int(user_id)
+        except (TypeError, ValueError):
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                {"id": ["Invalid id."]},
+                "Validation Error",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            target_user = CoreUser.objects.select_related("role").get(pk=target_id)
+        except CoreUser.DoesNotExist:
+            return ResponseService.response(
+                "NOT_FOUND",
+                {},
+                "User not found.",
+                status.HTTP_404_NOT_FOUND,
+            )
+
+        if not is_admin and target_user.id != request.user.id:
+            return ResponseService.response(
+                "FORBIDDEN",
+                {},
+                "You are not allowed to access this user.",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        return ResponseService.response(
+            "SUCCESS",
+            _serialize_user(target_user),
+            "User fetched successfully.",
+            status.HTTP_200_OK,
+        )
+
+    # No `id` provided
+    # - Non-admin: behave like the old `/api/users/me` (single user object).
+    # - Admin: list all users.
+    if not is_admin:
+        return ResponseService.response(
+            "SUCCESS",
+            _serialize_user(request.user),
+            "User fetched successfully.",
+            status.HTTP_200_OK,
+        )
+
+    # Admin listing (matches existing `/api/admin/users` filters)
+    role_name = request.GET.get("role")
+    status_key = request.GET.get("status")  # active | suspended | pending (optional)
+    users = CoreUser.objects.all().select_related("role")
+    if role_name:
+        users = users.filter(role__name__iexact=role_name)
+
+    if status_key:
+        if status_key == "active":
+            users = users.filter(is_active=True)
+        elif status_key == "suspended":
+            users = users.filter(is_active=False)
+        elif status_key == "pending":
+            users = users.filter(is_active=True, is_verified=False)
+
+    data = [_serialize_user(user) for user in users]
+    return ResponseService.response(
+        "SUCCESS",
+        data,
+        "Users fetched successfully.",
         status.HTTP_200_OK,
     )
 

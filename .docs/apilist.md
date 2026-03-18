@@ -342,8 +342,8 @@ List endpoints return:
 | POST | `/api/auth/register/customer` | None | — | `email` (required, valid email), `phone` (required), `password` (required, min 6), `first_name` (required), `last_name` (optional) |
 | POST | `/api/auth/register/vendor` | None | — | `email` (required), `phone` (required), `password` (required, min 6), `store_name` or `name` (required), `city` (optional), `first_name` (optional), `last_name` (optional) |
 | POST | `/api/auth/login` | None | — | `password` (required), `email` (optional), `phone` (optional) (but at least one of `email`/`phone` must be provided) |
-| GET | `/api/users/me` | Bearer | — | — |
-| PATCH | `/api/users/me` | Bearer | — | `first_name` (optional), `last_name` (optional), `phone` (optional) |
+| GET | `/api/users` | Bearer | `id` (optional), `role` (optional), `status` (optional) | — |
+| PATCH | `/api/users` | Bearer | `id` (optional; defaults to self) | `first_name` (optional), `last_name` (optional), `phone` (optional) |
 | POST | `/api/auth/logout` | Bearer | — | `refresh` (optional) |
 
 ### Vendor Self-Service
@@ -454,7 +454,6 @@ List endpoints return:
 ### Admin
 | Method | Endpoint | Auth | Query Params | Body |
 |---|---|---|---|---|
-| GET | `/api/admin/users` | Bearer (IsAdmin) | `role` (optional) | — |
 | GET | `/api/admin/users/{user_id}` | Bearer (IsAdmin) | — | — |
 | PATCH | `/api/admin/users/{user_id}/update` | Bearer (IsAdmin) | — | `role_name` (optional), `first_name` (optional), `last_name` (optional), `email` (optional), `phone` (optional), `is_active` (optional), `is_verified` (optional) |
 | POST | `/api/admin/users/{user_id}/block` | Bearer (IsAdmin) | — | — |

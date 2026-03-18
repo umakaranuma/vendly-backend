@@ -7,17 +7,38 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from vendly_backend.models import CoreRole, CoreUser, Vendor
+from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
 from vendly_backend.permissions import IsAdmin
+
+
+def _get_status_ref(entity_type: str, status_type: str, name: str):
+    """
+    Returns a CoreStatus row, seeding it if missing.
+    """
+    status_ref, _ = CoreStatus.objects.get_or_create(
+        status_type=status_type,
+        defaults={"entity_type": entity_type, "name": name, "sort_order": 10},
+    )
+    return status_ref
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_users(request: Request) -> Response:
     role_name = request.GET.get("role")
+    status_key = request.GET.get("status")  # active | suspended | pending (optional)
     users = CoreUser.objects.all().select_related("role")
     if role_name:
         users = users.filter(role__name__iexact=role_name)
+
+    if status_key:
+        if status_key == "active":
+            users = users.filter(is_active=True)
+        elif status_key == "suspended":
+            users = users.filter(is_active=False)
+        elif status_key == "pending":
+            # Pending definition for customers is not explicitly used in your flow.
+            users = users.filter(is_active=True, is_verified=False)
 
     data = []
     for user in users:
@@ -25,6 +46,9 @@ def list_users(request: Request) -> Response:
         role_payload = None
         if role:
             role_payload = {"id": role.id, "name": role.name, "description": role.description}
+        user_status = (
+            user.status_ref.name if getattr(user, "status_ref", None) else ("active" if user.is_active else "suspended")
+        )
         data.append(
             {
                 "id": user.id,
@@ -34,6 +58,7 @@ def list_users(request: Request) -> Response:
                 "last_name": user.last_name,
                 "is_active": user.is_active,
                 "is_verified": user.is_verified,
+                "status": user_status,
                 "role": role_payload,
             }
         )
@@ -72,6 +97,7 @@ def retrieve_user(request: Request, user_id: int) -> Response:
         "last_name": user.last_name,
         "is_active": user.is_active,
         "is_verified": user.is_verified,
+        "status": user.status_ref.name if getattr(user, "status_ref", None) else ("active" if user.is_active else "suspended"),
         "role": role_payload,
     }
 
@@ -103,6 +129,13 @@ def update_user(request: Request, user_id: int) -> Response:
     for field in ["first_name", "last_name", "email", "phone", "is_active", "is_verified"]:
         if field in data:
             setattr(user, field, data.get(field))
+
+    # Keep status_ref synced with is_active (best-effort; if data doesn't include is_active, keep as-is).
+    if "is_active" in data:
+        if user.is_active:
+            user.status_ref = _get_status_ref("customer", "customer_active", "active")
+        else:
+            user.status_ref = _get_status_ref("customer", "customer_suspended", "suspended")
 
     if role_name:
         role, _ = CoreRole.objects.get_or_create(name=role_name)
@@ -147,7 +180,8 @@ def block_user(request: Request, user_id: int) -> Response:
         )
 
     user.is_active = False
-    user.save(update_fields=["is_active"])
+    user.status_ref = _get_status_ref("customer", "customer_suspended", "suspended")
+    user.save(update_fields=["is_active", "status_ref"])
 
     payload = {
         "id": user.id,
@@ -181,7 +215,8 @@ def unblock_user(request: Request, user_id: int) -> Response:
         )
 
     user.is_active = True
-    user.save(update_fields=["is_active"])
+    user.status_ref = _get_status_ref("customer", "customer_active", "active")
+    user.save(update_fields=["is_active", "status_ref"])
 
     payload = {
         "id": user.id,
@@ -204,9 +239,30 @@ def unblock_user(request: Request, user_id: int) -> Response:
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_vendors(request: Request) -> Response:
-    vendors = Vendor.objects.select_related("user", "user__role")
+    status_key = request.GET.get("status")  # all | active | pending | inactive | suspended
+    vendors = Vendor.objects.select_related("user", "user__role", "status_ref")
+
+    if status_key:
+        if status_key == "active":
+            vendors = vendors.filter(status="approved")
+        elif status_key == "pending":
+            vendors = vendors.filter(status="pending")
+        elif status_key == "inactive":
+            vendors = vendors.filter(status="rejected")
+        elif status_key == "suspended":
+            vendors = vendors.filter(status="suspended")
+
     data = []
     for v in vendors:
+        if getattr(v, "status_ref", None):
+            status_value = v.status_ref.name
+        else:
+            # Backward compatible mapping for existing rows without `status_ref` populated.
+            status_value = (
+                "active"
+                if v.status == "approved"
+                else v.status
+            )
         data.append(
             {
                 "id": v.id,
@@ -217,7 +273,7 @@ def list_vendors(request: Request) -> Response:
                 "review_count": v.review_count,
                 "price_from": str(v.price_from) if v.price_from is not None else None,
                 "bio": v.bio,
-                "status": v.status,
+                "status": status_value,
             }
         )
 
@@ -233,7 +289,7 @@ def list_vendors(request: Request) -> Response:
 @permission_classes([IsAuthenticated, IsAdmin])
 def retrieve_vendor(request: Request, vendor_id: int) -> Response:
     try:
-        vendor = Vendor.objects.select_related("user", "user__role").get(pk=vendor_id)
+        vendor = Vendor.objects.select_related("user", "user__role", "status_ref").get(pk=vendor_id)
     except Vendor.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
@@ -251,7 +307,11 @@ def retrieve_vendor(request: Request, vendor_id: int) -> Response:
         "review_count": vendor.review_count,
         "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
         "bio": vendor.bio,
-        "status": vendor.status,
+        "status": (
+            vendor.status_ref.name
+            if getattr(vendor, "status_ref", None)
+            else ("active" if vendor.status == "approved" else vendor.status)
+        ),
     }
 
     return ResponseService.response(
@@ -275,8 +335,10 @@ def approve_vendor(request: Request, vendor_id: int) -> Response:
             status.HTTP_404_NOT_FOUND,
         )
 
+    active_ref = _get_status_ref("vendor", "vendor_active", "active")
     vendor.status = "approved"
-    vendor.save(update_fields=["status"])
+    vendor.status_ref = active_ref
+    vendor.save(update_fields=["status", "status_ref"])
 
     data = {
         "id": vendor.id,
@@ -287,7 +349,11 @@ def approve_vendor(request: Request, vendor_id: int) -> Response:
         "review_count": vendor.review_count,
         "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
         "bio": vendor.bio,
-        "status": vendor.status,
+        "status": (
+            vendor.status_ref.name
+            if getattr(vendor, "status_ref", None)
+            else ("active" if vendor.status == "approved" else vendor.status)
+        ),
     }
 
     return ResponseService.response(
@@ -312,8 +378,10 @@ def reject_vendor(request: Request, vendor_id: int) -> Response:
         )
 
     # Note: reason is not stored if there is no rejection_reason column in new Vendor.
+    rejected_ref = _get_status_ref("vendor", "vendor_rejected", "rejected")
     vendor.status = "rejected"
-    vendor.save(update_fields=["status"])
+    vendor.status_ref = rejected_ref
+    vendor.save(update_fields=["status", "status_ref"])
 
     data = {
         "id": vendor.id,
@@ -324,7 +392,11 @@ def reject_vendor(request: Request, vendor_id: int) -> Response:
         "review_count": vendor.review_count,
         "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
         "bio": vendor.bio,
-        "status": vendor.status,
+        "status": (
+            vendor.status_ref.name
+            if getattr(vendor, "status_ref", None)
+            else ("active" if vendor.status == "approved" else vendor.status)
+        ),
     }
 
     return ResponseService.response(
@@ -333,4 +405,49 @@ def reject_vendor(request: Request, vendor_id: int) -> Response:
         "Vendor rejected successfully.",
         status.HTTP_200_OK,
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated, IsAdmin])
+def suspend_vendor(request: Request, vendor_id: int) -> Response:
+    try:
+        vendor = Vendor.objects.select_related("status_ref").get(pk=vendor_id)
+    except Vendor.DoesNotExist:
+        return ResponseService.response(
+            "NOT_FOUND",
+            {},
+            "Vendor not found.",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    suspended_ref = _get_status_ref("vendor", "vendor_suspended", "suspended")
+    vendor.status = "suspended"
+    vendor.status_ref = suspended_ref
+    vendor.save(update_fields=["status", "status_ref"])
+
+    payload = {
+        "id": vendor.id,
+        "name": vendor.name,
+        "city": vendor.city,
+        "category_id": vendor.category_id,
+        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+        "review_count": vendor.review_count,
+        "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+        "bio": vendor.bio,
+        "status": vendor.status_ref.name if getattr(vendor, "status_ref", None) else vendor.status,
+    }
+
+    return ResponseService.response(
+        "SUCCESS",
+        payload,
+        "Vendor suspended successfully.",
+        status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated, IsAdmin])
+def resume_vendor(request: Request, vendor_id: int) -> Response:
+    # Resume from suspension -> treat as approved/active.
+    return approve_vendor(request, vendor_id)
 

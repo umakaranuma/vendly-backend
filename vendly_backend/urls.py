@@ -18,17 +18,15 @@ from django.contrib import admin
 from django.urls import path
 
 from vendly_backend.controllers.admin_controller import (
-    approve_vendor,
     block_user,
+    change_vendor_status,
     list_users,
+    change_user_status,
     list_vendors,
-    reject_vendor,
     retrieve_user,
     retrieve_vendor,
     unblock_user,
     update_user,
-    suspend_vendor,
-    resume_vendor,
 )
 from vendly_backend.controllers.admin_bookings_controller import (
     admin_bookings_list_view,
@@ -133,17 +131,11 @@ urlpatterns = [
     path("api/admin/users", list_users, name="admin_list_users"),
     path("api/admin/users/<int:user_id>", retrieve_user, name="admin_retrieve_user"),
     path("api/admin/users/<int:user_id>/update", update_user, name="admin_update_user"),
-    path("api/admin/users/<int:user_id>/block", block_user, name="admin_block_user"),
-    path("api/admin/users/<int:user_id>/unblock", unblock_user, name="admin_unblock_user"),
-    path("api/admin/users/<int:user_id>/suspend", block_user, name="admin_suspend_user"),
-    path("api/admin/users/<int:user_id>/resume", unblock_user, name="admin_resume_user"),
+    path("api/admin/users-change-status", change_user_status, name="admin_users_change_status"),
     # Admin: vendors
     path("api/admin/vendors", list_vendors, name="admin_list_vendors"),
     path("api/admin/vendors/<int:vendor_id>", retrieve_vendor, name="admin_retrieve_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/approve", approve_vendor, name="admin_approve_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/reject", reject_vendor, name="admin_reject_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/suspend", suspend_vendor, name="admin_suspend_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/resume", resume_vendor, name="admin_resume_vendor"),
+    path("api/admin/vendors-change-status", change_vendor_status, name="admin_vendors_change_status"),
 
     # Admin: bookings
     path("api/admin/bookings", admin_bookings_list_view, name="admin_list_bookings"),

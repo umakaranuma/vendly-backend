@@ -236,6 +236,62 @@ def unblock_user(request: Request, user_id: int) -> Response:
     )
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated, IsAdmin])
+def change_user_status(request: Request) -> Response:
+    """
+    Single endpoint for admin to change user status.
+
+    Body:
+    - user_id: int (required)
+    - status: "block" | "unblock" | "suspend" | "resume" (required)
+    """
+    user_id = request.data.get("user_id")
+    action = (request.data.get("status") or "").strip().lower()
+
+    valid_actions = {"block", "unblock", "suspend", "resume"}
+    if not user_id or not action or action not in valid_actions:
+        return ResponseService.response(
+            "BAD_REQUEST",
+            {"detail": "Provide `user_id` and valid `status` (block|unblock|suspend|resume)."},
+            "Validation error",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        user = CoreUser.objects.get(pk=int(user_id))
+    except (CoreUser.DoesNotExist, ValueError, TypeError):
+        return ResponseService.response(
+            "NOT_FOUND",
+            {},
+            "User not found.",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    if action in {"block", "suspend"}:
+        user.is_active = False
+        user.status_ref = _get_status_ref("customer", "customer_suspended", "suspended")
+    elif action in {"unblock", "resume"}:
+        user.is_active = True
+        user.status_ref = _get_status_ref("customer", "customer_active", "active")
+
+    user.save(update_fields=["is_active", "status_ref"])
+
+    payload = {
+        "id": user.id,
+        "is_active": user.is_active,
+        "is_verified": user.is_verified,
+        "status": user.status_ref.name if user.status_ref else ("active" if user.is_active else "suspended"),
+    }
+
+    return ResponseService.response(
+        "SUCCESS",
+        payload,
+        "User status updated successfully.",
+        status.HTTP_200_OK,
+    )
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_vendors(request: Request) -> Response:
@@ -450,4 +506,62 @@ def suspend_vendor(request: Request, vendor_id: int) -> Response:
 def resume_vendor(request: Request, vendor_id: int) -> Response:
     # Resume from suspension -> treat as approved/active.
     return approve_vendor(request, vendor_id)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated, IsAdmin])
+def change_vendor_status(request: Request) -> Response:
+    """
+    Single endpoint for admin to change vendor status.
+
+    Body:
+    - vendor_id: int (required)
+    - status: "approve" | "reject" | "suspend" | "resume" (required)
+    """
+    vendor_id = request.data.get("vendor_id")
+    action = (request.data.get("status") or "").strip().lower()
+
+    valid_actions = {"approve", "reject", "suspend", "resume"}
+    if not vendor_id or not action or action not in valid_actions:
+        return ResponseService.response(
+            "BAD_REQUEST",
+            {"detail": "Provide `vendor_id` and valid `status` (approve|reject|suspend|resume)."},
+            "Validation error",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        vendor = Vendor.objects.select_related("status_ref").get(pk=int(vendor_id))
+    except (Vendor.DoesNotExist, ValueError, TypeError):
+        return ResponseService.response(
+            "NOT_FOUND",
+            {},
+            "Vendor not found.",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    if action in {"approve", "resume"}:
+        active_ref = _get_status_ref("vendor", "vendor_active", "active")
+        vendor.status = "approved"
+        vendor.status_ref = active_ref
+    elif action == "reject":
+        rejected_ref = _get_status_ref("vendor", "vendor_rejected", "rejected")
+        vendor.status = "rejected"
+        vendor.status_ref = rejected_ref
+    elif action == "suspend":
+        suspended_ref = _get_status_ref("vendor", "vendor_suspended", "suspended")
+        vendor.status = "suspended"
+        vendor.status_ref = suspended_ref
+
+    vendor.save(update_fields=["status", "status_ref"])
+
+    return ResponseService.response(
+        "SUCCESS",
+        {
+            "id": vendor.id,
+            "status": vendor.status_ref.name if vendor.status_ref else vendor.status,
+        },
+        "Vendor status updated successfully.",
+        status.HTTP_200_OK,
+    )
 

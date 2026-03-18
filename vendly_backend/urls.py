@@ -18,9 +18,28 @@ from django.contrib import admin
 from django.urls import path
 
 from vendly_backend.controllers.admin_controller import (
-    approve_vendor, block_user, list_users, list_vendors, reject_vendor,
-    retrieve_user, retrieve_vendor, unblock_user, update_user,
+    approve_vendor,
+    block_user,
+    list_users,
+    list_vendors,
+    reject_vendor,
+    retrieve_user,
+    retrieve_vendor,
+    unblock_user,
+    update_user,
+    suspend_vendor,
+    resume_vendor,
 )
+from vendly_backend.controllers.admin_bookings_controller import (
+    admin_bookings_list_view,
+    admin_booking_update_view,
+)
+from vendly_backend.controllers.admin_dashboard_controller import admin_dashboard_summary_view
+from vendly_backend.controllers.admin_activity_controller import (
+    admin_notifications_activity_view,
+    admin_notification_activity_update_view,
+)
+from vendly_backend.controllers.admin_categories_controller import admin_categories_create_view
 from vendly_backend.controllers.auth_controller import (
     login_view, logout_view, me_view, register_customer, register_vendor,
 )
@@ -116,9 +135,31 @@ urlpatterns = [
     path("api/admin/users/<int:user_id>/update", update_user, name="admin_update_user"),
     path("api/admin/users/<int:user_id>/block", block_user, name="admin_block_user"),
     path("api/admin/users/<int:user_id>/unblock", unblock_user, name="admin_unblock_user"),
+    path("api/admin/users/<int:user_id>/suspend", block_user, name="admin_suspend_user"),
+    path("api/admin/users/<int:user_id>/resume", unblock_user, name="admin_resume_user"),
     # Admin: vendors
     path("api/admin/vendors", list_vendors, name="admin_list_vendors"),
     path("api/admin/vendors/<int:vendor_id>", retrieve_vendor, name="admin_retrieve_vendor"),
     path("api/admin/vendors/<int:vendor_id>/approve", approve_vendor, name="admin_approve_vendor"),
     path("api/admin/vendors/<int:vendor_id>/reject", reject_vendor, name="admin_reject_vendor"),
+    path("api/admin/vendors/<int:vendor_id>/suspend", suspend_vendor, name="admin_suspend_vendor"),
+    path("api/admin/vendors/<int:vendor_id>/resume", resume_vendor, name="admin_resume_vendor"),
+
+    # Admin: bookings
+    path("api/admin/bookings", admin_bookings_list_view, name="admin_list_bookings"),
+    path("api/admin/bookings/<int:booking_id>", admin_booking_update_view, name="admin_update_booking"),
+
+    # Admin: dashboard
+    path("api/admin/dashboard/summary", admin_dashboard_summary_view, name="admin_dashboard_summary"),
+
+    # Admin: activity log (notifications seen/unseen)
+    path("api/admin/activity/notifications", admin_notifications_activity_view, name="admin_activity_notifications"),
+    path(
+        "api/admin/activity/notifications/<int:notification_id>",
+        admin_notification_activity_update_view,
+        name="admin_activity_notification_update",
+    ),
+
+    # Admin: categories
+    path("api/admin/categories", admin_categories_create_view, name="admin_categories_create"),
 ]

@@ -11,7 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from vendly_backend.models import CoreRole, CoreUser, Vendor
+from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
 
 
 def _build_tokens_for_user(user: CoreUser) -> dict:
@@ -80,6 +80,13 @@ def register_customer(request: Request) -> Response:
         last_name=last_name,
         role=role,
     )
+
+    # Admin “user card” status (active by default).
+    user.status_ref = CoreStatus.objects.get_or_create(
+        status_type="customer_active",
+        defaults={"entity_type": "customer", "name": "active", "sort_order": 10},
+    )[0]
+    user.save(update_fields=["status_ref"])
 
     tokens = _build_tokens_for_user(user)
     user_payload = {
@@ -157,6 +164,11 @@ def register_vendor(request: Request) -> Response:
     role, _ = CoreRole.objects.get_or_create(name="VENDOR")
 
     with transaction.atomic():
+        pending_status, _ = CoreStatus.objects.get_or_create(
+            status_type="vendor_pending",
+            defaults={"entity_type": "vendor", "name": "pending", "sort_order": 10},
+        )
+
         user = CoreUser.objects.create_user(
             email=email,
             phone=phone,
@@ -166,11 +178,19 @@ def register_vendor(request: Request) -> Response:
             role=role,
         )
 
+        # Admin “user card” status (active by default).
+        user.status_ref = CoreStatus.objects.get_or_create(
+            status_type="customer_active",
+            defaults={"entity_type": "customer", "name": "active", "sort_order": 10},
+        )[0]
+        user.save(update_fields=["status_ref"])
+
         Vendor.objects.create(
             user=user,
             name=name,
             city=city,
-            status="pending"
+            status="pending",
+            status_ref=pending_status,
         )
 
     tokens = _build_tokens_for_user(user)

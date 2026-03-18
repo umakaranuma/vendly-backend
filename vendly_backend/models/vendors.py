@@ -1,6 +1,6 @@
 from django.db import models
 
-from vendly_backend.models.core import CoreUser
+from vendly_backend.models.core import CoreUser, CoreStatus
 
 
 class Category(models.Model):
@@ -37,6 +37,18 @@ class Vendor(models.Model):
         ('suspended', 'Suspended'),
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    # Admin status backing column (normalized). We keep `status` for backward compatibility.
+    # New code should prefer `status_ref` when present.
+    status_ref = models.ForeignKey(
+        CoreStatus,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vendors",
+        db_column="status_id",
+    )
+
     approved_at = models.DateTimeField(null=True, blank=True)
     approved_by_admin = models.ForeignKey(CoreUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_vendors")
     

@@ -343,3 +343,141 @@ List endpoints return:
 ---
 
 *API reference generated from `FEATURES_APIS_AND_DATABASE.md`. Update when new endpoints are added or existing ones are modified.*
+
+---
+
+## Generated From `vendly_backend/urls.py` (Methods, Params, Payload)
+
+### Auth
+| Method | Endpoint | Auth | Query Params | Body (request data) |
+|---|---|---|---|---|
+| POST | `/api/auth/register/customer` | None | — | `email` (required, valid email), `phone` (required), `password` (required, min 6), `first_name` (required), `last_name` (optional) |
+| POST | `/api/auth/register/vendor` | None | — | `email` (required), `phone` (required), `password` (required, min 6), `store_name` or `name` (required), `city` (optional), `first_name` (optional), `last_name` (optional) |
+| POST | `/api/auth/login` | None | — | `password` (required), `email` (optional), `phone` (optional) (but at least one of `email`/`phone` must be provided) |
+| GET | `/api/users/me` | Bearer | — | — |
+| PATCH | `/api/users/me` | Bearer | — | `first_name` (optional), `last_name` (optional), `phone` (optional) |
+| POST | `/api/auth/logout` | Bearer | — | `refresh` (optional) |
+
+### Vendor Self-Service
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/profile` | Bearer (IsVendor) | — | — |
+| PATCH | `/api/vendor/profile` | Bearer (IsVendor) | — | `name` (optional), `city` (optional), `bio` (optional), `price_from` (optional) |
+
+### Feed & Comments
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/feed/posts` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/feed/posts/{post_id}/like` | Bearer | — | — |
+| DELETE | `/api/feed/posts/{post_id}/like` | Bearer | — | — |
+| GET | `/api/feed/posts/{post_id}/comments` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/feed/posts/{post_id}/comments` | Bearer | — | `text` (required), `parent_id` (optional) |
+| POST | `/api/feed/comments/{comment_id}/like` | Bearer | — | — |
+
+### Categories
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/categories` | None | `page`=1, `limit`=50 | — |
+| GET | `/api/categories/{category_id}` | None | — | — |
+
+### Favorites
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/users/me/favorites` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/vendors/{vendor_id}/favorite` | Bearer | — | — |
+| DELETE | `/api/vendors/{vendor_id}/favorite` | Bearer | — | — |
+
+### Bookings
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/bookings` | Bearer | `page`=1, `limit`=20, `status` (optional) | — |
+| POST | `/api/bookings` | Bearer | — | `vendor_id` (required), `event_type` (required), `booking_date` (required), `location` (optional), `amount` (optional), `deposit` (optional) |
+| GET | `/api/bookings/{booking_id}` | Bearer | — | — |
+| PATCH | `/api/bookings/{booking_id}` | Bearer | — | `status` (required; one of `pending`, `confirmed`, `completed`, `cancelled`) |
+
+### Vendor Reviews (by vendor_id)
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendors/{vendor_id}/reviews` | None (AllowAny) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendors/{vendor_id}/reviews` | AllowAny (POST requires Bearer inside) | — | `booking_id` (required), `rating` (required), `comment` (optional) |
+
+### Messaging / Conversations
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/conversations` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/conversations` | Bearer | — | `partner_id` (required) |
+| GET | `/api/conversations/{conversation_id}` | Bearer | — | — |
+| DELETE | `/api/conversations/{conversation_id}` | Bearer | — | — |
+| GET | `/api/conversations/{conversation_id}/messages` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/conversations/{conversation_id}/messages` | Bearer | — | `text` (optional), `attachment_url` (optional) but at least one must be present |
+| PATCH | `/api/conversations/{conversation_id}/read` | Bearer | — | — |
+
+### Invitations
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/invitations/templates` | Bearer | `page`=1, `limit`=20, `type` (optional) | — |
+| GET | `/api/invitations` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/invitations` | Bearer | — | `invitation_type` (required), `event_type` (required), `answers` (optional; default `{}`), `template_id` (optional) |
+| GET | `/api/invitations/{invitation_id}` | Bearer | — | — |
+| DELETE | `/api/invitations/{invitation_id}` | Bearer | — | — |
+
+### Vendor - Listings (self)
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/listings` | Bearer (IsVendor) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendor/listings` | Bearer (IsVendor) | — | `title` (required), `description` (optional), `price` (optional), `category` (optional) |
+| PUT | `/api/vendor/listings/{listing_id}` | Bearer (IsVendor) | — | `title` (optional), `description` (optional), `price` (optional), `category` (optional) |
+| DELETE | `/api/vendor/listings/{listing_id}` | Bearer (IsVendor) | — | — |
+
+### Vendor - Posts (self)
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/posts` | Bearer (IsVendor) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendor/posts` | Bearer (IsVendor) | — | `caption` (optional; default `""`), `media` (optional; list of `{ url, is_video?, sort_order? }` where `url` is required per item) |
+| DELETE | `/api/vendor/posts/{post_id}` | Bearer (IsVendor) | — | — |
+
+### Vendor - Packages
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendors/{vendor_id}/packages` | None (AllowAny) | `page`=1, `limit`=20 | — |
+| GET | `/api/vendor/packages` | Bearer (IsVendor) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendor/packages` | Bearer (IsVendor) | — | `name` (required), `price` (required), `features_text` (optional), `features_json` (optional), `is_active` (optional; default `true`) |
+| PUT | `/api/vendor/packages/{package_id}` | Bearer (IsVendor) | — | `name` (optional), `price` (optional), `features_text` (optional), `features_json` (optional), `is_active` (optional) |
+| DELETE | `/api/vendor/packages/{package_id}` | Bearer (IsVendor) | — | — |
+
+### Vendor - Subscription
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/subscription` | Bearer (IsVendor) | — | — |
+| GET | `/api/subscription/plans` | Bearer | `page`=1, `limit`=20 | — |
+
+### Vendor - Analytics
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/analytics` | Bearer (IsVendor) | `from` (optional), `to` (optional) | — |
+
+### Notifications
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/users/me/notifications` | Bearer | `page`=1, `limit`=20 | — |
+| PATCH | `/api/users/me/notifications/{notification_id}/read` | Bearer | — | — |
+| PATCH | `/api/users/me/notification-settings` | Bearer | — | `push` (optional), `email` (optional) |
+
+### Admin
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/admin/users` | Bearer (IsAdmin) | `role` (optional) | — |
+| GET | `/api/admin/users/{user_id}` | Bearer (IsAdmin) | — | — |
+| PATCH | `/api/admin/users/{user_id}/update` | Bearer (IsAdmin) | — | `role_name` (optional), `first_name` (optional), `last_name` (optional), `email` (optional), `phone` (optional), `is_active` (optional), `is_verified` (optional) |
+| POST | `/api/admin/users/{user_id}/block` | Bearer (IsAdmin) | — | — |
+| POST | `/api/admin/users/{user_id}/unblock` | Bearer (IsAdmin) | — | — |
+| GET | `/api/admin/vendors` | Bearer (IsAdmin) | — | — |
+| GET | `/api/admin/vendors/{vendor_id}` | Bearer (IsAdmin) | — | — |
+| POST | `/api/admin/vendors/{vendor_id}/approve` | Bearer (IsAdmin) | — | — |
+| POST | `/api/admin/vendors/{vendor_id}/reject` | Bearer (IsAdmin) | — | — |
+
+### File Upload
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| POST | `/api/upload-file` | Bearer | — | multipart `file` (required), `path` (optional; folder/key prefix) |
+

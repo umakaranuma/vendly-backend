@@ -86,6 +86,12 @@
 |---|---|---|---|---|---|
 | GET | `categories` | Optional | `?page=1&limit=50` | `{ items: [Category], total }` | All |
 | GET | `categories/:id` | Optional | — | `Category` | All |
+
+### Admin Categories
+> Admin CRUD is **not currently registered** in `vendly_backend/urls.py`. Add routes + controller methods to enable these.
+
+| Method | Path | Auth | Request | Response | Who |
+|---|---|---|---|---|---|
 | POST | `admin/categories` | Admin | `{ name, slug?, description?, sort_order? }` | `Category` | Admin only |
 | PUT | `admin/categories/:id` | Admin | `{ name?, slug?, description?, sort_order? }` | `Category` | Admin only |
 | DELETE | `admin/categories/:id` | Admin | — | 204 | Admin only |
@@ -244,52 +250,34 @@
 
 > All admin endpoints require `role = admin`.
 
-### Users
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/users` | List users (paginated, filter by role) |
-| GET | `admin/users/:id` | User detail |
-| PATCH | `admin/users/:id` | Update user (role, suspend, etc.) |
+### Current Admin Endpoints (wired in `vendly_backend/urls.py`)
 
-### Vendors
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/vendors` | List vendors; filter by `status` |
-| PATCH | `admin/vendors/:id/approve` | Approve vendor (`status = 'approved'`) |
-| PATCH | `admin/vendors/:id/reject` | Reject/suspend vendor |
-| GET | `admin/vendors/:id/subscription` | View vendor's subscription |
-| POST | `admin/vendors/:id/subscription` | Assign/upgrade vendor subscription |
+#### Admin - Users (implemented)
+| Method | Path | Auth | Query Params / Body |
+|---|---|---|---|
+| GET | `admin/users` | Bearer | `role` optional (filter) |
+| GET | `admin/users/:user_id` | Bearer | — |
+| PATCH | `admin/users/:user_id/update` | Bearer | `role_name` optional, `first_name`, `last_name`, `email`, `phone`, `is_active`, `is_verified` |
+| POST | `admin/users/:user_id/block` | Bearer | — |
+| POST | `admin/users/:user_id/unblock` | Bearer | — |
 
-### Content Moderation
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/posts` | List all posts; filter by vendor |
-| DELETE | `admin/posts/:id` | Delete post |
-| GET | `admin/conversations` | List all conversations (paginated) |
-| GET | `admin/conversations/:id/messages` | View messages in conversation |
-| DELETE | `admin/messages/:id` | Delete message |
-| DELETE | `admin/reviews/:id` | Delete vendor review |
+#### Admin - Vendors (implemented)
+| Method | Path | Auth | Query Params / Body |
+|---|---|---|---|
+| GET | `admin/vendors` | Bearer | — |
+| GET | `admin/vendors/:vendor_id` | Bearer | — |
+| POST | `admin/vendors/:vendor_id/approve` | Bearer | — (sets `vendors.status = approved`) |
+| POST | `admin/vendors/:vendor_id/reject` | Bearer | — (sets `vendors.status = rejected`) |
 
-### Categories
-| Method | Path | Description |
+### Required Admin Endpoints (you requested; NOT wired yet)
+| Area | Needed Endpoint(s) | What it should do |
 |---|---|---|
-| POST | `admin/categories` | Create category |
-| PUT | `admin/categories/:id` | Update category |
-| DELETE | `admin/categories/:id` | Delete category |
-
-### Subscriptions
-| Method | Path | Description |
-|---|---|---|
-| POST | `admin/subscription/plans` | Create subscription plan |
-| PUT | `admin/subscription/plans/:id` | Update subscription plan |
-| DELETE | `admin/subscription/plans/:id` | Delete subscription plan |
-
-### Other
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/bookings` | List all bookings |
-| GET | `admin/invitations` | List all invitations |
-| GET | `admin/notifications` | List or send system notifications |
+| Totals | `GET admin/stats` | Return totals like `users_total`, `vendors_total`, `admins_total` |
+| Categories CRUD | `POST admin/categories`, `PUT admin/categories/:id`, `DELETE admin/categories/:id` | Admin create/update/delete categories |
+| Reviews moderation | `DELETE admin/reviews/:review_id` | Admin delete vendor reviews |
+| Vendor profile approval | Use `POST admin/vendors/:vendor_id/approve` | Admin makes vendor active/approved (already sets vendor status; if you also need `VendorProfile`, implement that too) |
+| Package limit / subscriptions | `POST admin/subscription/plans`, `PUT admin/subscription/plans/:id`, `DELETE admin/subscription/plans/:id` | Admin manages `SubscriptionPlan.max_packages` |
+|  | `POST admin/vendors/:vendor_id/subscription` | Admin assigns/updates vendor subscription (sets `plan_id`, `starts_at`, `ends_at`, `is_active`) |
 
 ---
 

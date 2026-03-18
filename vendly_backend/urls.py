@@ -20,13 +20,13 @@ from django.urls import path
 from vendly_backend.controllers.admin_controller import (
     block_user,
     change_vendor_status,
-    list_users,
     change_user_status,
     list_vendors,
     retrieve_user,
     retrieve_vendor,
     unblock_user,
     update_user,
+    users_view,
 )
 from vendly_backend.controllers.admin_bookings_controller import (
     admin_bookings_list_view,
@@ -39,7 +39,7 @@ from vendly_backend.controllers.admin_activity_controller import (
 )
 from vendly_backend.controllers.admin_categories_controller import admin_categories_create_view
 from vendly_backend.controllers.auth_controller import (
-    login_view, logout_view, me_view, register_customer, register_vendor,
+    login_view, logout_view, register_customer, register_vendor,
 )
 from vendly_backend.controllers.vendor_controller import vendor_profile_view
 from vendly_backend.controllers.feed_controller import list_posts, post_like, post_comments, comment_like
@@ -63,7 +63,7 @@ urlpatterns = [
     path("api/auth/register/customer", register_customer, name="register_customer"),
     path("api/auth/register/vendor", register_vendor, name="register_vendor"),
     path("api/auth/login", login_view, name="login"),
-    path("api/users/me", me_view, name="me"),
+    path("api/users", users_view, name="users"),
     path("api/auth/logout", logout_view, name="logout"),
     
     # Profile / Vendor Self-Service
@@ -128,7 +128,6 @@ urlpatterns = [
     path("api/upload-file", file_upload_view),
     
     # Admin: users
-    path("api/admin/users", list_users, name="admin_list_users"),
     path("api/admin/users/<int:user_id>", retrieve_user, name="admin_retrieve_user"),
     path("api/admin/users/<int:user_id>/update", update_user, name="admin_update_user"),
     path("api/admin/users-change-status", change_user_status, name="admin_users_change_status"),

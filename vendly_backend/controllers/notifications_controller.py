@@ -6,12 +6,50 @@ from rest_framework import status
 
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
-from vendly_backend.models import Notification, UserNotificationSetting
+from vendly_backend.models import CoreUser, Notification, UserNotificationSetting
+
+
+def _resolve_target_user(request: Request):
+    is_admin = getattr(request.user.role, "name", "").upper() in {"ADMIN", "SUPER_ADMIN"}
+
+    user_id = request.GET.get("id")
+    if user_id is None:
+        return request.user, None
+
+    try:
+        target_user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None, ResponseService.response(
+            "VALIDATION_ERROR",
+            {"id": ["Invalid id."]},
+            "Validation Error",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not is_admin and target_user_id != request.user.id:
+        return None, ResponseService.response(
+            "FORBIDDEN",
+            {},
+            "You are not allowed to access this user's notifications.",
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        return CoreUser.objects.get(pk=target_user_id), None
+    except CoreUser.DoesNotExist:
+        return None, ResponseService.response(
+            "NOT_FOUND",
+            {},
+            "User not found.",
+            status.HTTP_404_NOT_FOUND,
+        )
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def notifications_view(request: Request) -> Response:
-    user = request.user
+    user, error = _resolve_target_user(request)
+    if error is not None:
+        return error
     
     try:
         page = int(request.GET.get("page", 1))
@@ -37,8 +75,11 @@ def notifications_view(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def read_notification_view(request: Request, notification_id: int) -> Response:
     from django.utils import timezone
+    user, error = _resolve_target_user(request)
+    if error is not None:
+        return error
     try:
-        notification = Notification.objects.get(id=notification_id, user=request.user)
+        notification = Notification.objects.get(id=notification_id, user=user)
     except Notification.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Notification not found.", status.HTTP_404_NOT_FOUND)
 
@@ -50,7 +91,9 @@ def read_notification_view(request: Request, notification_id: int) -> Response:
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated])
 def notification_settings_view(request: Request) -> Response:
-    user = request.user
+    user, error = _resolve_target_user(request)
+    if error is not None:
+        return error
     settings, created = UserNotificationSetting.objects.get_or_create(user=user)
     
     data = request.data

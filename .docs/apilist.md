@@ -371,7 +371,7 @@ List endpoints return:
 ### Favorites
 | Method | Endpoint | Auth | Query Params | Body |
 |---|---|---|---|---|
-| GET | `/api/users/me/favorites` | Bearer | `page`=1, `limit`=20 | — |
+| GET | `/api/users/favorites` | Bearer | `id` (optional), `page`=1, `limit`=20 | — |
 | POST | `/api/vendors/{vendor_id}/favorite` | Bearer | — | — |
 | DELETE | `/api/vendors/{vendor_id}/favorite` | Bearer | — | — |
 
@@ -447,9 +447,9 @@ List endpoints return:
 ### Notifications
 | Method | Endpoint | Auth | Query Params | Body |
 |---|---|---|---|---|
-| GET | `/api/users/me/notifications` | Bearer | `page`=1, `limit`=20 | — |
-| PATCH | `/api/users/me/notifications/{notification_id}/read` | Bearer | — | — |
-| PATCH | `/api/users/me/notification-settings` | Bearer | — | `push` (optional), `email` (optional) |
+| GET | `/api/users/notifications` | Bearer | `id` (optional), `page`=1, `limit`=20 | — |
+| PATCH | `/api/users/notifications/{notification_id}/read` | Bearer | `id` (optional) | — |
+| PATCH | `/api/users/notification-settings` | Bearer | `id` (optional) | `push` (optional), `email` (optional) |
 
 ### Admin
 | Method | Endpoint | Auth | Query Params | Body |

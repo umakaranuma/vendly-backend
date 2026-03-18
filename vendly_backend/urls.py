@@ -80,7 +80,7 @@ urlpatterns = [
     path("api/categories/<int:category_id>", category_detail_view),
     
     # Favorites
-    path("api/users/me/favorites", favorites_list_view),
+    path("api/users/favorites", favorites_list_view),
     path("api/vendors/<int:vendor_id>/favorite", favorite_vendor_view),
 
     # Bookings
@@ -120,9 +120,9 @@ urlpatterns = [
     path("api/vendor/analytics", vendor_analytics_view),
 
     # Notifications
-    path("api/users/me/notifications", notifications_view),
-    path("api/users/me/notifications/<int:notification_id>/read", read_notification_view),
-    path("api/users/me/notification-settings", notification_settings_view),
+    path("api/users/notifications", notifications_view),
+    path("api/users/notifications/<int:notification_id>/read", read_notification_view),
+    path("api/users/notification-settings", notification_settings_view),
 
     # File Upload
     path("api/upload-file", file_upload_view),

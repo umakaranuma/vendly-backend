@@ -6,4 +6,5 @@ mServices
 python-dotenv>=1.0
 mysqlclient>=2.2
 pymysql>=1.1
+pingram-python
 

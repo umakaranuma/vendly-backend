@@ -101,3 +101,7 @@ REST_FRAMEWORK = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+PINGRAM_API_KEY = os.getenv("PINGRAM_API_KEY", "")
+PINGRAM_BASE_URL = os.getenv("PINGRAM_BASE_URL", "https://api.pingram.io")
+OTP_EXPIRES_IN_SECONDS = int(os.getenv("OTP_EXPIRES_IN_SECONDS", "600"))
+

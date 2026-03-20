@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import random
+from datetime import timedelta
+
 import mServices.ResponseService as ResponseService
+from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from mServices.ValidatorService import ValidatorService
 from rest_framework import status
@@ -13,12 +21,89 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
 
+try:
+    from pingram import Pingram
+except Exception:  # pragma: no cover - optional dependency at runtime
+    Pingram = None
+
+
+logger = logging.getLogger(__name__)
+
+
+OTP_CACHE_PREFIX = "auth:otp"
+
 
 def _build_tokens_for_user(user: CoreUser) -> dict:
     refresh = RefreshToken.for_user(user)
     return {
         "access": str(refresh.access_token),
         "refresh": str(refresh),
+    }
+
+
+def _otp_cache_key(user_id: int) -> str:
+    return f"{OTP_CACHE_PREFIX}:{user_id}"
+
+
+def _generate_otp() -> str:
+    return f"{random.randint(100000, 999999)}"
+
+
+async def _send_pingram_sms(phone: str, otp_code: str) -> None:
+    if not settings.PINGRAM_API_KEY:
+        raise RuntimeError("PINGRAM_API_KEY is not configured.")
+    if Pingram is None:
+        raise RuntimeError("pingram-python package is not installed.")
+
+    async with Pingram(
+        api_key=settings.PINGRAM_API_KEY,
+        base_url=settings.PINGRAM_BASE_URL,
+    ) as client:
+        await client.send(
+            {
+                "type": "alert",
+                "to": {
+                    "id": phone,
+                    "number": phone,
+                },
+                "sms": {
+                    "message": f"Your verification code is: {otp_code}. Reply STOP to opt-out.",
+                },
+            }
+        )
+
+
+def _send_registration_otp(user: CoreUser) -> None:
+    otp_code = _generate_otp()
+    expires_in = int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600))
+    expires_at = timezone.now() + timedelta(seconds=expires_in)
+
+    cache.set(
+        _otp_cache_key(user.id),
+        {
+            "otp_code": otp_code,
+            "expires_at": expires_at.isoformat(),
+        },
+        timeout=expires_in,
+    )
+
+    asyncio.run(_send_pingram_sms(user.phone or "", otp_code))
+
+
+def _user_payload(user: CoreUser) -> dict:
+    role = user.role
+    role_payload = None
+    if role:
+        role_payload = {"id": role.id, "name": role.name, "description": role.description}
+    return {
+        "id": user.id,
+        "email": user.email,
+        "phone": user.phone,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "is_active": user.is_active,
+        "is_verified": user.is_verified,
+        "role": role_payload,
     }
 
 
@@ -72,37 +157,41 @@ def register_customer(request: Request) -> Response:
 
     role, _ = CoreRole.objects.get_or_create(name="CUSTOMER")
 
-    user = CoreUser.objects.create_user(
-        email=email,
-        phone=phone,
-        password=password,
-        first_name=first_name,
-        last_name=last_name,
-        role=role,
-    )
+    try:
+        with transaction.atomic():
+            user = CoreUser.objects.create_user(
+                email=email,
+                phone=phone,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+                role=role,
+            )
 
-    # Admin “user card” status (active by default).
-    user.status_ref = CoreStatus.objects.get_or_create(
-        status_type="customer_active",
-        defaults={"entity_type": "customer", "name": "active", "sort_order": 10},
-    )[0]
-    user.save(update_fields=["status_ref"])
+            # Admin “user card” status (active by default).
+            user.status_ref = CoreStatus.objects.get_or_create(
+                status_type="customer_active",
+                defaults={"entity_type": "customer", "name": "active", "sort_order": 10},
+            )[0]
+            user.save(update_fields=["status_ref"])
+            _send_registration_otp(user)
+    except Exception as exc:
+        logger.exception("Failed sending registration OTP for customer: %s", exc)
+        return ResponseService.response(
+            "SERVER_ERROR",
+            {"detail": "Unable to send OTP right now. Please try again."},
+            "Registration failed.",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
-    tokens = _build_tokens_for_user(user)
-    user_payload = {
-        "id": user.id,
-        "email": user.email,
-        "phone": user.phone,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_active": user.is_active,
-        "is_verified": user.is_verified,
-        "role": {"id": role.id, "name": role.name, "description": role.description},
-    }
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": user_payload},
-        "Customer registered successfully.",
+        {
+            "user": _user_payload(user),
+            "otp_sent": True,
+            "otp_expires_in_seconds": int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600)),
+        },
+        "Customer registered successfully. Please confirm OTP.",
         status.HTTP_201_CREATED,
     )
 
@@ -163,51 +252,54 @@ def register_vendor(request: Request) -> Response:
 
     role, _ = CoreRole.objects.get_or_create(name="VENDOR")
 
-    with transaction.atomic():
-        pending_status, _ = CoreStatus.objects.get_or_create(
-            status_type="vendor_pending",
-            defaults={"entity_type": "vendor", "name": "pending", "sort_order": 10},
+    try:
+        with transaction.atomic():
+            pending_status, _ = CoreStatus.objects.get_or_create(
+                status_type="vendor_pending",
+                defaults={"entity_type": "vendor", "name": "pending", "sort_order": 10},
+            )
+
+            user = CoreUser.objects.create_user(
+                email=email,
+                phone=phone,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+                role=role,
+            )
+
+            # Admin “user card” status (active by default).
+            user.status_ref = CoreStatus.objects.get_or_create(
+                status_type="customer_active",
+                defaults={"entity_type": "customer", "name": "active", "sort_order": 10},
+            )[0]
+            user.save(update_fields=["status_ref"])
+
+            Vendor.objects.create(
+                user=user,
+                name=name,
+                city=city,
+                status="pending",
+                status_ref=pending_status,
+            )
+            _send_registration_otp(user)
+    except Exception as exc:
+        logger.exception("Failed sending registration OTP for vendor: %s", exc)
+        return ResponseService.response(
+            "SERVER_ERROR",
+            {"detail": "Unable to send OTP right now. Please try again."},
+            "Registration failed.",
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-        user = CoreUser.objects.create_user(
-            email=email,
-            phone=phone,
-            password=password,
-            first_name=first_name,
-            last_name=last_name,
-            role=role,
-        )
-
-        # Admin “user card” status (active by default).
-        user.status_ref = CoreStatus.objects.get_or_create(
-            status_type="customer_active",
-            defaults={"entity_type": "customer", "name": "active", "sort_order": 10},
-        )[0]
-        user.save(update_fields=["status_ref"])
-
-        Vendor.objects.create(
-            user=user,
-            name=name,
-            city=city,
-            status="pending",
-            status_ref=pending_status,
-        )
-
-    tokens = _build_tokens_for_user(user)
-    user_payload = {
-        "id": user.id,
-        "email": user.email,
-        "phone": user.phone,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_active": user.is_active,
-        "is_verified": user.is_verified,
-        "role": {"id": role.id, "name": role.name, "description": role.description},
-    }
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": user_payload},
-        "Vendor registered successfully.",
+        {
+            "user": _user_payload(user),
+            "otp_sent": True,
+            "otp_expires_in_seconds": int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600)),
+        },
+        "Vendor registered successfully. Please confirm OTP.",
         status.HTTP_201_CREATED,
     )
 
@@ -263,6 +355,14 @@ def login_view(request: Request) -> Response:
             status.HTTP_401_UNAUTHORIZED,
         )
 
+    if not user.is_verified:
+        return ResponseService.response(
+            "FORBIDDEN",
+            {"detail": _("Please verify OTP to complete registration.")},
+            "Login failed.",
+            status.HTTP_403_FORBIDDEN,
+        )
+
     if not user.is_active:
         return ResponseService.response(
             "FORBIDDEN",
@@ -273,26 +373,75 @@ def login_view(request: Request) -> Response:
 
     tokens = _build_tokens_for_user(user)
 
-    role = user.role
-    role_payload = None
-    if role:
-        role_payload = {"id": role.id, "name": role.name, "description": role.description}
-
-    user_payload = {
-        "id": user.id,
-        "email": user.email,
-        "phone": user.phone,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_active": user.is_active,
-        "is_verified": user.is_verified,
-        "role": role_payload,
-    }
-
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": user_payload},
+        {"tokens": tokens, "user": _user_payload(user)},
         "Login successful.",
+        status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def confirm_registration_otp(request: Request) -> Response:
+    data = request.data
+    otp_code = (data.get("otp") or "").strip()
+    user_id = data.get("user_id")
+
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "user_id": "required",
+            "otp": "required",
+        },
+        custom_messages={
+            "user_id.required": "User id is required.",
+            "otp.required": "OTP is required.",
+        },
+    )
+    if errors:
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            errors,
+            "Validation Error",
+        )
+
+    try:
+        user = CoreUser.objects.get(id=user_id)
+    except CoreUser.DoesNotExist:
+        return ResponseService.response(
+            "NOT_FOUND",
+            {"detail": "User not found."},
+            "Verification failed.",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    otp_data = cache.get(_otp_cache_key(user.id))
+    if not otp_data:
+        return ResponseService.response(
+            "UNAUTHORIZED",
+            {"detail": "OTP expired or not found. Please register again."},
+            "Verification failed.",
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if str(otp_data.get("otp_code")) != otp_code:
+        return ResponseService.response(
+            "UNAUTHORIZED",
+            {"detail": "Invalid OTP."},
+            "Verification failed.",
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    user.is_verified = True
+    user.save(update_fields=["is_verified"])
+    cache.delete(_otp_cache_key(user.id))
+
+    tokens = _build_tokens_for_user(user)
+    return ResponseService.response(
+        "SUCCESS",
+        {"tokens": tokens, "user": _user_payload(user)},
+        "OTP confirmed. Registration completed successfully.",
         status.HTTP_200_OK,
     )
 

@@ -39,7 +39,11 @@ from vendly_backend.controllers.admin_activity_controller import (
 )
 from vendly_backend.controllers.admin_categories_controller import admin_categories_create_view
 from vendly_backend.controllers.auth_controller import (
-    login_view, logout_view, register_customer, register_vendor,
+    confirm_registration_otp,
+    login_view,
+    logout_view,
+    register_customer,
+    register_vendor,
 )
 from vendly_backend.controllers.vendor_controller import vendor_profile_view
 from vendly_backend.controllers.feed_controller import list_posts, post_like, post_comments, comment_like
@@ -62,6 +66,7 @@ urlpatterns = [
     # Auth
     path("api/auth/register/customer", register_customer, name="register_customer"),
     path("api/auth/register/vendor", register_vendor, name="register_vendor"),
+    path("api/auth/confirm-otp", confirm_registration_otp, name="confirm_registration_otp"),
     path("api/auth/login", login_view, name="login"),
     path("api/users", users_view, name="users"),
     path("api/auth/logout", logout_view, name="logout"),

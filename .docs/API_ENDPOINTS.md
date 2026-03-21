@@ -18,6 +18,68 @@ Authenticated routes expect `Authorization: Bearer <access_token>` unless noted.
 | POST | `/api/admin/login` | Admin JWT login (role `ADMIN`/`SUPER_ADMIN`, or Django superuser; same body as login) |
 | GET, PATCH | `/api/users` | List/filter users (GET) or update profile (PATCH) |
 
+### 1.1 `/api/users` response reference
+
+#### `GET /api/users` (admin user)
+
+Admin list response is paginated and returned through `ResponseService`.
+
+```json
+{
+  "is_success": true,
+  "message": "Users fetched successfully.",
+  "result": {
+    "total_records": 1,
+    "per_page": 20,
+    "current_page": 1,
+    "last_page": 1,
+    "data": [
+      {
+        "id": 7,
+        "email": "user@example.com",
+        "phone": "+919999999999",
+        "first_name": "Test",
+        "last_name": "User",
+        "is_active": true,
+        "is_verified": true,
+        "role_id": 2,
+        "role_name": "CUSTOMER",
+        "role_description": "",
+        "status": "active"
+      }
+    ]
+  },
+  "system_code": 200
+}
+```
+
+#### `GET /api/users` (non-admin user)
+
+Returns the authenticated user's profile object.
+
+```json
+{
+  "is_success": true,
+  "message": "User fetched successfully.",
+  "result": {
+    "id": 7,
+    "email": "user@example.com",
+    "phone": "+919999999999",
+    "first_name": "Test",
+    "last_name": "User",
+    "is_active": true,
+    "is_verified": true,
+    "status": "active",
+    "role": {
+      "id": 2,
+      "name": "CUSTOMER",
+      "description": ""
+    }
+  },
+  "system_code": 200
+}
+```
+
 ---
 
 ## 2. Profile & vendor self-service
@@ -166,13 +228,18 @@ Authenticated routes expect `Authorization: Bearer <access_token>` unless noted.
 - `status` (string like `open`, `in_review`, etc.; validated using `core_statuses` as `chat_report_<status>`)
 - `reason_type` (string/free text)
 
-**Success response (ResponseService format):**
+**Success response format:**
 
 ```json
 {
-  "status": "SUCCESS",
-  "data": {
-    "items": [
+  "is_success": true,
+  "message": "Chat reports retrieved successfully.",
+  "result": {
+    "total_records": 1,
+    "per_page": 20,
+    "current_page": 1,
+    "last_page": 1,
+    "data": [
       {
         "id": 12,
         "conversation_id": 44,
@@ -203,11 +270,9 @@ Authenticated routes expect `Authorization: Bearer <access_token>` unless noted.
           }
         ]
       }
-    ],
-    "total": 1,
-    "next_page": null
+    ]
   },
-  "message": "Chat reports retrieved successfully."
+  "system_code": 200
 }
 ```
 
@@ -222,12 +287,13 @@ Authenticated routes expect `Authorization: Bearer <access_token>` unless noted.
 }
 ```
 
-**Success response (ResponseService format):**
+**Success response format:**
 
 ```json
 {
-  "status": "SUCCESS",
-  "data": {
+  "is_success": true,
+  "message": "Chat report updated successfully.",
+  "result": {
     "id": 12,
     "status": "in_review",
     "status_type": "chat_report_in_review",
@@ -236,7 +302,7 @@ Authenticated routes expect `Authorization: Bearer <access_token>` unless noted.
     "reviewed_by_id": 1,
     "reviewed_at": "2026-03-21T12:20:00Z"
   },
-  "message": "Chat report updated successfully."
+  "system_code": 200
 }
 ```
 
@@ -248,9 +314,14 @@ Both endpoints are paginated and returned via `ResponseService`.
 
 ```json
 {
-  "status": "SUCCESS",
-  "data": {
-    "items": [
+  "is_success": true,
+  "message": "Template types retrieved successfully.",
+  "result": {
+    "total_records": 1,
+    "per_page": 20,
+    "current_page": 1,
+    "last_page": 1,
+    "data": [
       {
         "id": 1,
         "name": "Video",
@@ -258,11 +329,9 @@ Both endpoints are paginated and returned via `ResponseService`.
         "description": "Video invitation template type",
         "sort_order": 10
       }
-    ],
-    "total": 1,
-    "next_page": null
+    ]
   },
-  "message": "Template types retrieved successfully."
+  "system_code": 200
 }
 ```
 

@@ -1,6 +1,6 @@
 from django.db import models
 
-from vendly_backend.models.core import CoreUser
+from vendly_backend.models.core import CoreStatus, CoreUser
 
 
 class Conversation(models.Model):
@@ -52,7 +52,24 @@ class MessageReadReceipt(models.Model):
 class ChatReport(models.Model):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="reports")
     reporter = models.ForeignKey(CoreUser, on_delete=models.CASCADE, related_name="chat_reports")
+    reason_type = models.CharField(max_length=100, null=True, blank=True)
     reason = models.TextField(null=True, blank=True)
+    status = models.ForeignKey(
+        CoreStatus,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="chat_reports",
+    )
+    admin_action_note = models.TextField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        CoreUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_chat_reports",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

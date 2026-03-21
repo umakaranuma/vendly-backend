@@ -60,6 +60,7 @@ from vendly_backend.controllers.feed_controller import list_posts, post_like, po
 from vendly_backend.controllers.bookings_controller import bookings_list_view, booking_detail_view
 from vendly_backend.controllers.reviews_controller import vendor_reviews_view
 from vendly_backend.controllers.messaging_controller import (
+    admin_chat_report_update_view,
     admin_chat_reports_view,
     conversation_detail_view,
     conversations_view,
@@ -183,6 +184,7 @@ urlpatterns = [
     path("api/admin/categories", admin_categories_create_view, name="admin_categories_create"),
     # Admin: chat reports
     path("api/admin/chat-reports", admin_chat_reports_view, name="admin_chat_reports"),
+    path("api/admin/chat-reports/<int:report_id>", admin_chat_report_update_view, name="admin_chat_report_update"),
     # Admin: invitation template types
     path("api/admin/template-types", admin_template_types_view, name="admin_template_types"),
     path("api/admin/template-types/<int:type_id>", admin_template_type_detail_view, name="admin_template_type_detail"),

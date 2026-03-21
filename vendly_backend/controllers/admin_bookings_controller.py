@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from mServices.ResponseService import ResponseService
+from vendly_backend.activity_log import log_activity
 from vendly_backend.models import Booking
 from vendly_backend.permissions import IsAdmin
 
@@ -99,6 +100,14 @@ def admin_booking_update_view(request: Request, booking_id: int) -> Response:
 
     booking.status = new_status
     booking.save(update_fields=["status", "updated_at"])
+    log_activity(
+        actor=request.user,
+        category="booking",
+        event="admin_status_updated",
+        resource_type="booking",
+        resource_id=booking.id,
+        payload={"status": booking.status},
+    )
 
     return ResponseService.response(
         "SUCCESS",

@@ -34,6 +34,7 @@ from vendly_backend.controllers.admin_bookings_controller import (
 )
 from vendly_backend.controllers.admin_dashboard_controller import admin_dashboard_summary_view
 from vendly_backend.controllers.admin_activity_controller import (
+    admin_activity_logs_view,
     admin_notifications_activity_view,
     admin_notification_activity_update_view,
 )
@@ -152,6 +153,7 @@ urlpatterns = [
     path("api/admin/dashboard/summary", admin_dashboard_summary_view, name="admin_dashboard_summary"),
 
     # Admin: activity log (notifications seen/unseen)
+    path("api/admin/activity/logs", admin_activity_logs_view, name="admin_activity_logs"),
     path("api/admin/activity/notifications", admin_notifications_activity_view, name="admin_activity_notifications"),
     path(
         "api/admin/activity/notifications/<int:notification_id>",

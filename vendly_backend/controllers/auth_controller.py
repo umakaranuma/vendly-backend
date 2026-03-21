@@ -20,6 +20,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from vendly_backend.activity_log import log_activity
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
 from vendly_backend.permissions import is_admin_user
 
@@ -262,6 +263,15 @@ def register_customer(request: Request) -> Response:
             status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+    log_activity(
+        actor=user,
+        category="registration",
+        event="customer_registered",
+        resource_type="core_user",
+        resource_id=user.id,
+        payload={"role": "customer"},
+    )
+
     return ResponseService.response(
         "SUCCESS",
         {
@@ -272,6 +282,8 @@ def register_customer(request: Request) -> Response:
         "Customer registered successfully. Please confirm OTP.",
         status.HTTP_201_CREATED,
     )
+
+
 
 
 @api_view(["POST"])
@@ -371,6 +383,15 @@ def register_vendor(request: Request) -> Response:
             status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
+    log_activity(
+        actor=user,
+        category="registration",
+        event="vendor_registered",
+        resource_type="core_user",
+        resource_id=user.id,
+        payload={"role": "vendor", "store_name": name},
+    )
+
     return ResponseService.response(
         "SUCCESS",
         {
@@ -452,6 +473,13 @@ def login_view(request: Request) -> Response:
         )
 
     tokens = _build_tokens_for_user(user)
+    log_activity(
+        actor=user,
+        category="session",
+        event="login_success",
+        resource_type="core_user",
+        resource_id=user.id,
+    )
 
     return ResponseService.response(
         "SUCCESS",
@@ -534,6 +562,13 @@ def admin_login_view(request: Request) -> Response:
         )
 
     tokens = _build_tokens_for_user(user)
+    log_activity(
+        actor=user,
+        category="session",
+        event="admin_login_success",
+        resource_type="core_user",
+        resource_id=user.id,
+    )
 
     return ResponseService.response(
         "SUCCESS",
@@ -599,6 +634,13 @@ def confirm_registration_otp(request: Request) -> Response:
     user.is_verified = True
     user.save(update_fields=["is_verified"])
     cache.delete(_otp_cache_key(user.id))
+    log_activity(
+        actor=user,
+        category="registration",
+        event="otp_confirmed",
+        resource_type="core_user",
+        resource_id=user.id,
+    )
 
     tokens = _build_tokens_for_user(user)
     return ResponseService.response(
@@ -671,6 +713,7 @@ def me_view(request: Request) -> Response:
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def logout_view(request: Request) -> Response:
+    user = request.user if isinstance(request.user, CoreUser) else None
     refresh_token = request.data.get("refresh")
     if refresh_token:
         try:
@@ -679,6 +722,14 @@ def logout_view(request: Request) -> Response:
         except Exception:
             # If blacklist is not enabled or token invalid, ignore.
             pass
+
+    log_activity(
+        actor=user,
+        category="session",
+        event="logout",
+        resource_type="core_user" if user else None,
+        resource_id=user.id if user else None,
+    )
 
     return ResponseService.response(
         "SUCCESS",

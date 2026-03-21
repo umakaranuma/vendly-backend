@@ -7,7 +7,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ResponseService import ResponseService
+from mServices.ValidatorService import ValidatorService
 from vendly_backend.models import InvitationTemplateType
 from vendly_backend.permissions import IsAdmin
 
@@ -34,53 +36,64 @@ def _parse_bool(value, default: bool) -> bool:
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def template_types_public_view(request: Request) -> Response:
-    items = InvitationTemplateType.objects.filter(is_active=True).order_by("sort_order", "id")
-    payload = [
-        {
-            "id": t.id,
-            "name": t.name,
-            "type_key": t.type_key,
-            "description": t.description,
-            "sort_order": t.sort_order,
-        }
-        for t in items
-    ]
-    return ResponseService.response("SUCCESS", payload, "Template types retrieved successfully.")
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 20))
+        query = (
+            QueryBuilderService("invitation_template_types")
+            .select(
+                "invitation_template_types.id",
+                "invitation_template_types.name",
+                "invitation_template_types.type_key",
+                "invitation_template_types.description",
+                "invitation_template_types.sort_order",
+            )
+            .apply_conditions('{"is_active": true}', ["is_active"], "", [])
+            .paginate(page, limit, ["invitation_template_types.sort_order"], "invitation_template_types.sort_order", "asc")
+        )
+        return ResponseService.response("SUCCESS", query, "Template types retrieved successfully.")
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def admin_template_types_view(request: Request) -> Response:
     if request.method == "GET":
-        items = InvitationTemplateType.objects.all().order_by("sort_order", "id")
-        payload = [
-            {
-                "id": t.id,
-                "name": t.name,
-                "type_key": t.type_key,
-                "description": t.description,
-                "sort_order": t.sort_order,
-                "is_active": t.is_active,
-                "created_at": t.created_at,
-                "updated_at": t.updated_at,
-            }
-            for t in items
-        ]
-        return ResponseService.response("SUCCESS", payload, "Template types retrieved successfully.")
+        try:
+            page = int(request.GET.get("page", 1))
+            limit = int(request.GET.get("limit", 20))
+            query = (
+                QueryBuilderService("invitation_template_types")
+                .select(
+                    "invitation_template_types.id",
+                    "invitation_template_types.name",
+                    "invitation_template_types.type_key",
+                    "invitation_template_types.description",
+                    "invitation_template_types.sort_order",
+                    "invitation_template_types.is_active",
+                    "invitation_template_types.created_at",
+                    "invitation_template_types.updated_at",
+                )
+                .paginate(page, limit, ["invitation_template_types.sort_order"], "invitation_template_types.sort_order", "asc")
+            )
+            return ResponseService.response("SUCCESS", query, "Template types retrieved successfully.")
+        except Exception as e:
+            return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
     data = request.data
+    errors = ValidatorService.validate(
+        data,
+        rules={"name": "required"},
+        custom_messages={"name.required": "name is required."},
+    )
+    if errors:
+        return ResponseService.response("VALIDATION_ERROR", errors, "Validation Error")
+
     name = (data.get("name") or "").strip()
     description = data.get("description")
     sort_order = int(data.get("sort_order", 0))
     is_active = _parse_bool(data.get("is_active"), True)
-
-    if not name:
-        return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "name is required."},
-            "Validation error",
-            status.HTTP_400_BAD_REQUEST,
-        )
 
     type_key = _build_type_key(name)
     if InvitationTemplateType.objects.filter(type_key=type_key).exists():
@@ -132,16 +145,17 @@ def admin_template_type_detail_view(request: Request, type_id: int) -> Response:
 
     if request.method == "PATCH":
         data = request.data
+        if "name" in data:
+            errors = ValidatorService.validate(
+                data,
+                rules={"name": "required"},
+                custom_messages={"name.required": "name cannot be empty."},
+            )
+            if errors:
+                return ResponseService.response("VALIDATION_ERROR", errors, "Validation Error")
 
         if "name" in data:
             new_name = (data.get("name") or "").strip()
-            if not new_name:
-                return ResponseService.response(
-                    "BAD_REQUEST",
-                    {"detail": "name cannot be empty."},
-                    "Validation error",
-                    status.HTTP_400_BAD_REQUEST,
-                )
             new_type_key = _build_type_key(new_name)
             if InvitationTemplateType.objects.exclude(id=item.id).filter(type_key=new_type_key).exists():
                 return ResponseService.response(

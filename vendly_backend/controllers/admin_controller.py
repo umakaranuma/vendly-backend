@@ -9,7 +9,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
-from vendly_backend.permissions import IsAdmin
+from vendly_backend.permissions import IsAdmin, is_admin_user
 
 
 def _get_status_ref(entity_type: str, status_type: str, name: str):
@@ -110,7 +110,7 @@ def users_view(request: Request) -> Response:
     - Admin: supports listing via `GET /api/users` and retrieving via `GET /api/users?id=<user_id>`.
     """
 
-    is_admin = getattr(request.user.role, "name", "").upper() in {"ADMIN", "SUPER_ADMIN"}
+    is_admin = is_admin_user(request.user)
     user_id = request.GET.get("id")
 
     if request.method == "PATCH":

@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
+from vendly_backend.permissions import is_admin_user
 
 try:
     from pingram import Pingram
@@ -59,7 +60,7 @@ async def _send_pingram_sms(phone: str, otp_code: str) -> None:
         api_key=settings.PINGRAM_API_KEY,
         base_url=settings.PINGRAM_BASE_URL,
     ) as client:
-        await client.send(
+        response = await client.send(
             {
                 "type": "alert",
                 "to": {
@@ -71,6 +72,12 @@ async def _send_pingram_sms(phone: str, otp_code: str) -> None:
                 },
             }
         )
+        # Pingram may return a tracking id while not creating an SMS message.
+        # Treat empty messages as a failed send so registration does not report OTP sent.
+        if not getattr(response, "messages", None):
+            raise RuntimeError(
+                f"Pingram did not queue SMS. tracking_id={getattr(response, 'tracking_id', None)}"
+            )
 
 
 def _send_registration_otp(user: CoreUser) -> None:
@@ -377,6 +384,87 @@ def login_view(request: Request) -> Response:
         "SUCCESS",
         {"tokens": tokens, "user": _user_payload(user)},
         "Login successful.",
+        status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def admin_login_view(request: Request) -> Response:
+    """
+    JWT login for staff dashboard clients. Same credentials shape as /api/auth/login.
+    Allowed: CoreRole ADMIN/SUPER_ADMIN, or Django superuser (createsuperuser).
+    Does not require OTP verification for accounts outside the customer/vendor registration flow.
+    """
+    data = request.data
+    email = (data.get("email") or "").strip() or None
+    phone = (data.get("phone") or "").strip() or None
+    password = data.get("password") or ""
+
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "password": "required",
+        },
+        custom_messages={
+            "password.required": "Password is required.",
+        },
+    )
+
+    if not email and not phone:
+        errors = errors or {}
+        errors.setdefault("contact", []).append("Either email or phone is required.")
+
+    if errors:
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            errors,
+            "Validation Error",
+        )
+
+    user: CoreUser | None = None
+
+    if email:
+        try:
+            user = CoreUser.objects.select_related("role").get(email=email)
+        except CoreUser.DoesNotExist:
+            user = None
+    elif phone:
+        try:
+            user = CoreUser.objects.select_related("role").get(phone=phone)
+        except CoreUser.DoesNotExist:
+            user = None
+
+    if not user or not user.check_password(password):
+        return ResponseService.response(
+            "UNAUTHORIZED",
+            {"detail": _("Unable to log in with provided credentials.")},
+            "Login failed.",
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if not is_admin_user(user):
+        return ResponseService.response(
+            "FORBIDDEN",
+            {"detail": _("Admin privileges required.")},
+            "Login failed.",
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    if not user.is_active:
+        return ResponseService.response(
+            "FORBIDDEN",
+            {"detail": _("User account is disabled.")},
+            "Login failed.",
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    tokens = _build_tokens_for_user(user)
+
+    return ResponseService.response(
+        "SUCCESS",
+        {"tokens": tokens, "user": _user_payload(user)},
+        "Admin login successful.",
         status.HTTP_200_OK,
     )
 

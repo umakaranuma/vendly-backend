@@ -7,10 +7,11 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import CoreUser, Notification, UserNotificationSetting
+from vendly_backend.permissions import is_admin_user
 
 
 def _resolve_target_user(request: Request):
-    is_admin = getattr(request.user.role, "name", "").upper() in {"ADMIN", "SUPER_ADMIN"}
+    is_admin = is_admin_user(request.user)
 
     user_id = request.GET.get("id")
     if user_id is None:

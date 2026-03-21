@@ -106,19 +106,44 @@ async def _send_pingram_sms(phone: str, otp_code: str) -> None:
         api_key=settings.PINGRAM_API_KEY,
         base_url=settings.PINGRAM_BASE_URL,
     ) as client:
-        response = await client.send(
-            {
-                "type": "alert",
-                # Only `number` for ad-hoc SMS — `id` is a Pingram user id and can target the wrong contact.
-                "to": {"number": to_number},
-                "forceChannels": ["SMS"],
-                "sms": {
-                    "message": f"Your verification code is: {otp_code}. Reply STOP to opt-out.",
-                },
-            }
-        )
+        payload = {
+            # Only `number` for ad-hoc SMS — `id` is a Pingram user id and can target the wrong contact.
+            "to": {"number": to_number},
+            "forceChannels": ["SMS"],
+            "sms": {
+                "message": f"Your verification code is: {otp_code}. Reply STOP to opt-out.",
+            },
+        }
+        response = None
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await client.send(payload)
+                break
+            except Exception as exc:
+                status_code = getattr(exc, "status", None) or getattr(exc, "status_code", None)
+                is_retryable = status_code in {502, 503, 504}
+                if not is_retryable or attempt == max_attempts:
+                    raise
+                logger.warning(
+                    "Pingram temporary failure while sending OTP. attempt=%s status=%s number=%s error=%s",
+                    attempt,
+                    status_code,
+                    to_number,
+                    exc,
+                )
+                await asyncio.sleep(0.8 * attempt)
+
+        if response is None:
+            raise RuntimeError("Pingram SMS response missing after retries.")
         tracking_id = getattr(response, "tracking_id", None)
         messages = getattr(response, "messages", None) or []
+        logger.info(
+            "Pingram OTP SMS accepted. number=%s tracking_id=%s messages=%s",
+            to_number,
+            tracking_id,
+            messages,
+        )
         # Pingram can acknowledge accepted delivery with tracking_id even when messages is empty.
         # Fail only when both tracking metadata and messages are missing.
         if not tracking_id and not messages:

@@ -82,6 +82,7 @@ Authenticated routes expect `Authorization: Bearer <access_token>` unless noted.
 | GET, DELETE | `/api/conversations/<conversation_id>` | Detail / delete conversation |
 | GET, POST | `/api/conversations/<conversation_id>/messages` | List / send messages |
 | PATCH | `/api/conversations/<conversation_id>/read` | Mark as read |
+| POST | `/api/conversations/<conversation_id>/report` | Report up to 5 chat messages |
 
 ---
 
@@ -143,9 +144,127 @@ Authenticated routes expect `Authorization: Bearer <access_token>` unless noted.
 | GET | `/api/admin/bookings` | List bookings (admin) |
 | PATCH | `/api/admin/bookings/<booking_id>` | Update booking (admin) |
 | GET | `/api/admin/dashboard/summary` | Dashboard summary |
+| GET | `/api/admin/dashboard/best-performers` | Month-wise best performers (vendors) |
+| GET | `/api/admin/activity/logs` | Admin activity logs |
 | GET | `/api/admin/activity/notifications` | Admin activity notifications |
 | PATCH | `/api/admin/activity/notifications/<notification_id>` | Update activity notification |
 | POST | `/api/admin/categories` | Create category (admin) |
+| GET, POST | `/api/admin/template-types` | Template types list/create (admin) |
+| GET, PATCH, DELETE | `/api/admin/template-types/<type_id>` | Template type detail/update/delete (admin) |
+| GET | `/api/admin/chat-reports` | Chat reports list (admin) |
+| PATCH | `/api/admin/chat-reports/<report_id>` | Chat report status/action update (admin) |
+
+### 13.1 Admin chat reports payload reference
+
+#### `GET /api/admin/chat-reports`
+
+**Query params (optional):**
+- `page` (int, default: `1`)
+- `limit` (int, default: `20`)
+- `conversation_id` (int)
+- `reporter_id` (int)
+- `status` (string like `open`, `in_review`, etc.; validated using `core_statuses` as `chat_report_<status>`)
+- `reason_type` (string/free text)
+
+**Success response (ResponseService format):**
+
+```json
+{
+  "status": "SUCCESS",
+  "data": {
+    "items": [
+      {
+        "id": 12,
+        "conversation_id": 44,
+        "reporter_id": 9,
+        "reason_type": "harassment",
+        "reason": "Abusive words in chat",
+        "status_id": 101,
+        "status": "open",
+        "status_type": "chat_report_open",
+        "admin_action_note": null,
+        "reviewed_by_id": null,
+        "reviewed_at": null,
+        "created_at": "2026-03-21T12:10:00Z",
+        "reporter_first_name": "Arun",
+        "reporter_last_name": "K",
+        "reporter_role": "CUSTOMER",
+        "reported_messages": [
+          {
+            "message_id": 501,
+            "chat_id": 44,
+            "text": "Sample abusive message",
+            "attachment_url": null,
+            "message_created_at": "2026-03-21T11:58:00Z",
+            "sender_id": 22,
+            "sender_type": "vendor",
+            "sender_first_name": "Vendor",
+            "sender_last_name": "One"
+          }
+        ]
+      }
+    ],
+    "total": 1,
+    "next_page": null
+  },
+  "message": "Chat reports retrieved successfully."
+}
+```
+
+#### `PATCH /api/admin/chat-reports/<report_id>`
+
+**Request body (at least one field required):**
+
+```json
+{
+  "status": "in_review",
+  "admin_action_note": "Warned vendor account and monitoring next messages."
+}
+```
+
+**Success response (ResponseService format):**
+
+```json
+{
+  "status": "SUCCESS",
+  "data": {
+    "id": 12,
+    "status": "in_review",
+    "status_type": "chat_report_in_review",
+    "status_id": 102,
+    "admin_action_note": "Warned vendor account and monitoring next messages.",
+    "reviewed_by_id": 1,
+    "reviewed_at": "2026-03-21T12:20:00Z"
+  },
+  "message": "Chat report updated successfully."
+}
+```
+
+### 13.2 Template types response reference
+
+#### `GET /api/admin/template-types` and `GET /api/invitations/template-types`
+
+Both endpoints are paginated and returned via `ResponseService`.
+
+```json
+{
+  "status": "SUCCESS",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "name": "Video",
+        "type_key": "template_video",
+        "description": "Video invitation template type",
+        "sort_order": 10
+      }
+    ],
+    "total": 1,
+    "next_page": null
+  },
+  "message": "Template types retrieved successfully."
+}
+```
 
 ---
 

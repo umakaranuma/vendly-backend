@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
+from mServices.ValidatorService import ValidatorService
 from vendly_backend.models import (
     ChatReport,
     ChatReportMessage,
@@ -173,9 +174,18 @@ def report_chat_messages_view(request: Request, conversation_id: int) -> Respons
     except ConversationParticipant.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Conversation not found.", status.HTTP_404_NOT_FOUND)
 
-    message_ids = request.data.get("message_ids") or []
-    reason_type = (request.data.get("reason_type") or "").strip()
-    reason = request.data.get("reason")
+    data = request.data
+    errors = ValidatorService.validate(
+        data,
+        rules={"message_ids": "required"},
+        custom_messages={"message_ids.required": "message_ids is required."},
+    )
+    if errors:
+        return ResponseService.response("VALIDATION_ERROR", errors, "Validation Error")
+
+    message_ids = data.get("message_ids") or []
+    reason_type = (data.get("reason_type") or "").strip()
+    reason = data.get("reason")
     if not isinstance(message_ids, list) or not message_ids:
         return ResponseService.response(
             "BAD_REQUEST",
@@ -254,9 +264,21 @@ def report_chat_messages_view(request: Request, conversation_id: int) -> Respons
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def admin_chat_reports_view(request: Request) -> Response:
+    params = {
+        "page": request.GET.get("page", 1),
+        "limit": request.GET.get("limit", 20),
+    }
+    errors = ValidatorService.validate(
+        params,
+        rules={"page": "required", "limit": "required"},
+        custom_messages={},
+    )
+    if errors:
+        return ResponseService.response("VALIDATION_ERROR", errors, "Validation Error")
+
     try:
-        page = int(request.GET.get("page", 1))
-        limit = int(request.GET.get("limit", 20))
+        page = int(params["page"])
+        limit = int(params["limit"])
     except ValueError:
         return ResponseService.response(
             "BAD_REQUEST",
@@ -355,8 +377,9 @@ def admin_chat_report_update_view(request: Request, report_id: int) -> Response:
     except ChatReport.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Chat report not found.", status.HTTP_404_NOT_FOUND)
 
-    new_status = request.data.get("status")
-    action_note = request.data.get("admin_action_note")
+    data = request.data
+    new_status = data.get("status")
+    action_note = data.get("admin_action_note")
     if new_status is None and action_note is None:
         return ResponseService.response(
             "BAD_REQUEST",

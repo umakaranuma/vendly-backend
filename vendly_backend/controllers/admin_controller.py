@@ -57,7 +57,7 @@ def list_users(request: Request) -> Response:
     return _list_users_response(request)
 
 
-def _list_users_response(request: Request) -> Response:
+def _list_users_response(request: Request, forced_user_id: int | None = None) -> Response:
     try:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 20))
@@ -68,6 +68,8 @@ def _list_users_response(request: Request) -> Response:
         filters: dict[str, object] = {}
         if role_name:
             filters["core_roles.name"] = role_name
+        if forced_user_id is not None:
+            filters["core_users.id"] = forced_user_id
         if status_key == "active":
             filters["core_users.is_active"] = True
         elif status_key == "suspended":
@@ -96,7 +98,7 @@ def _list_users_response(request: Request) -> Response:
             .leftJoin("core_statuses", "core_statuses.id", "core_users.status_id")
             .apply_conditions(
                 filter_json,
-                ["core_roles.name", "core_users.is_active", "core_users.is_verified"],
+                ["core_roles.name", "core_users.id", "core_users.is_active", "core_users.is_verified"],
                 search_string,
                 ["core_users.first_name", "core_users.last_name", "core_users.email", "core_users.phone"],
             )
@@ -257,12 +259,7 @@ def users_view(request: Request) -> Response:
     # - Non-admin: behave like the old `/api/users/me` (single user object).
     # - Admin: list all users.
     if not is_admin:
-        return ResponseService.response(
-            "SUCCESS",
-            _serialize_user(request.user),
-            "User fetched successfully.",
-            status.HTTP_200_OK,
-        )
+        return _list_users_response(request, forced_user_id=request.user.id)
 
     # Admin listing (matches existing `/api/admin/users` filters)
     return _list_users_response(request)

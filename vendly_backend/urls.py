@@ -59,7 +59,14 @@ from vendly_backend.controllers.vendor_controller import vendor_profile_view
 from vendly_backend.controllers.feed_controller import list_posts, post_like, post_comments, comment_like
 from vendly_backend.controllers.bookings_controller import bookings_list_view, booking_detail_view
 from vendly_backend.controllers.reviews_controller import vendor_reviews_view
-from vendly_backend.controllers.messaging_controller import conversations_view, conversation_detail_view, messages_view, read_messages_view
+from vendly_backend.controllers.messaging_controller import (
+    admin_chat_reports_view,
+    conversation_detail_view,
+    conversations_view,
+    messages_view,
+    read_messages_view,
+    report_chat_messages_view,
+)
 from vendly_backend.controllers.invitations_controller import invitation_templates_view, invitations_view, invitation_detail_view
 from vendly_backend.controllers.categories_controller import categories_list_view, category_detail_view
 from vendly_backend.controllers.favorites_controller import favorites_list_view, favorite_vendor_view
@@ -112,6 +119,7 @@ urlpatterns = [
     path("api/conversations/<int:conversation_id>", conversation_detail_view),
     path("api/conversations/<int:conversation_id>/messages", messages_view),
     path("api/conversations/<int:conversation_id>/read", read_messages_view),
+    path("api/conversations/<int:conversation_id>/report", report_chat_messages_view),
 
     # Invitations
     path("api/invitations/templates", invitation_templates_view),
@@ -173,6 +181,8 @@ urlpatterns = [
 
     # Admin: categories
     path("api/admin/categories", admin_categories_create_view, name="admin_categories_create"),
+    # Admin: chat reports
+    path("api/admin/chat-reports", admin_chat_reports_view, name="admin_chat_reports"),
     # Admin: invitation template types
     path("api/admin/template-types", admin_template_types_view, name="admin_template_types"),
     path("api/admin/template-types/<int:type_id>", admin_template_type_detail_view, name="admin_template_type_detail"),

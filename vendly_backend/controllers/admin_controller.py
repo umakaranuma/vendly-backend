@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 import mServices.ResponseService as ResponseService
+from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -51,31 +54,62 @@ def _serialize_user(user: CoreUser) -> dict:
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_users(request: Request) -> Response:
-    role_name = request.GET.get("role")
-    status_key = request.GET.get("status")  # active | suspended | pending (optional)
-    users = CoreUser.objects.all().select_related("role")
-    if role_name:
-        users = users.filter(role__name__iexact=role_name)
+    return _list_users_response(request)
 
-    if status_key:
+
+def _list_users_response(request: Request) -> Response:
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 20))
+        role_name = (request.GET.get("role") or "").strip()
+        status_key = (request.GET.get("status") or "").strip().lower()  # active | suspended | pending
+        search_string = request.GET.get("search", "")
+
+        filters: dict[str, object] = {}
+        if role_name:
+            filters["core_roles.name"] = role_name
         if status_key == "active":
-            users = users.filter(is_active=True)
+            filters["core_users.is_active"] = True
         elif status_key == "suspended":
-            users = users.filter(is_active=False)
+            filters["core_users.is_active"] = False
         elif status_key == "pending":
-            # Pending definition for customers is not explicitly used in your flow.
-            users = users.filter(is_active=True, is_verified=False)
+            filters["core_users.is_active"] = True
+            filters["core_users.is_verified"] = False
+        filter_json = json.dumps(filters)
 
-    data = []
-    for user in users:
-        data.append(_serialize_user(user))
-
-    return ResponseService.response(
-        "SUCCESS",
-        data,
-        "Users fetched successfully.",
-        status.HTTP_200_OK,
-    )
+        query = (
+            QueryBuilderService("core_users")
+            .select(
+                "core_users.id",
+                "core_users.email",
+                "core_users.phone",
+                "core_users.first_name",
+                "core_users.last_name",
+                "core_users.is_active",
+                "core_users.is_verified",
+                "core_roles.id as role_id",
+                "core_roles.name as role_name",
+                "core_roles.description as role_description",
+                "core_statuses.name as status",
+            )
+            .leftJoin("core_roles", "core_roles.id", "core_users.role_id")
+            .leftJoin("core_statuses", "core_statuses.id", "core_users.status_id")
+            .apply_conditions(
+                filter_json,
+                ["core_roles.name", "core_users.is_active", "core_users.is_verified"],
+                search_string,
+                ["core_users.first_name", "core_users.last_name", "core_users.email", "core_users.phone"],
+            )
+            .paginate(page, limit, ["core_users.id", "core_users.created_at"], "core_users.created_at", "desc")
+        )
+        return ResponseService.response(
+            "SUCCESS",
+            query,
+            "Users fetched successfully.",
+            status.HTTP_200_OK,
+        )
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
 
 @api_view(["GET"])
@@ -231,27 +265,7 @@ def users_view(request: Request) -> Response:
         )
 
     # Admin listing (matches existing `/api/admin/users` filters)
-    role_name = request.GET.get("role")
-    status_key = request.GET.get("status")  # active | suspended | pending (optional)
-    users = CoreUser.objects.all().select_related("role")
-    if role_name:
-        users = users.filter(role__name__iexact=role_name)
-
-    if status_key:
-        if status_key == "active":
-            users = users.filter(is_active=True)
-        elif status_key == "suspended":
-            users = users.filter(is_active=False)
-        elif status_key == "pending":
-            users = users.filter(is_active=True, is_verified=False)
-
-    data = [_serialize_user(user) for user in users]
-    return ResponseService.response(
-        "SUCCESS",
-        data,
-        "Users fetched successfully.",
-        status.HTTP_200_OK,
-    )
+    return _list_users_response(request)
 
 
 @api_view(["PATCH"])
@@ -440,50 +454,54 @@ def change_user_status(request: Request) -> Response:
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, IsAdmin])
 def list_vendors(request: Request) -> Response:
-    status_key = request.GET.get("status")  # all | active | pending | inactive | suspended
-    vendors = Vendor.objects.select_related("user", "user__role", "status_ref")
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 20))
+        status_key = (request.GET.get("status") or "").strip().lower()  # all | active | pending | inactive | suspended
+        search_string = request.GET.get("search", "")
 
-    if status_key:
+        filters: dict[str, object] = {}
         if status_key == "active":
-            vendors = vendors.filter(status="approved")
+            filters["vendors.status"] = "approved"
         elif status_key == "pending":
-            vendors = vendors.filter(status="pending")
+            filters["vendors.status"] = "pending"
         elif status_key == "inactive":
-            vendors = vendors.filter(status="rejected")
+            filters["vendors.status"] = "rejected"
         elif status_key == "suspended":
-            vendors = vendors.filter(status="suspended")
+            filters["vendors.status"] = "suspended"
+        filter_json = json.dumps(filters)
 
-    data = []
-    for v in vendors:
-        if getattr(v, "status_ref", None):
-            status_value = v.status_ref.name
-        else:
-            # Backward compatible mapping for existing rows without `status_ref` populated.
-            status_value = (
-                "active"
-                if v.status == "approved"
-                else v.status
+        query = (
+            QueryBuilderService("vendors")
+            .select(
+                "vendors.id",
+                "vendors.name",
+                "vendors.city",
+                "vendors.category_id",
+                "vendors.rating",
+                "vendors.review_count",
+                "vendors.price_from",
+                "vendors.bio",
+                "vendors.status",
+                "core_statuses.name as status_ref_name",
             )
-        data.append(
-            {
-                "id": v.id,
-                "name": v.name,
-                "city": v.city,
-                "category_id": v.category_id,
-                "rating": float(v.rating) if v.rating is not None else 0.0,
-                "review_count": v.review_count,
-                "price_from": str(v.price_from) if v.price_from is not None else None,
-                "bio": v.bio,
-                "status": status_value,
-            }
+            .leftJoin("core_statuses", "core_statuses.id", "vendors.status_id")
+            .apply_conditions(
+                filter_json,
+                ["vendors.status"],
+                search_string,
+                ["vendors.name", "vendors.city", "vendors.bio"],
+            )
+            .paginate(page, limit, ["vendors.id", "vendors.created_at"], "vendors.created_at", "desc")
         )
-
-    return ResponseService.response(
-        "SUCCESS",
-        data,
-        "Vendors fetched successfully.",
-        status.HTTP_200_OK,
-    )
+        return ResponseService.response(
+            "SUCCESS",
+            query,
+            "Vendors fetched successfully.",
+            status.HTTP_200_OK,
+        )
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
 
 @api_view(["GET"])

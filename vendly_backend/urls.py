@@ -18,17 +18,56 @@ from django.contrib import admin
 from django.urls import path
 
 from vendly_backend.controllers.admin_controller import (
-    approve_vendor, block_user, list_users, list_vendors, reject_vendor,
-    retrieve_user, retrieve_vendor, unblock_user, update_user,
+    block_user,
+    change_vendor_status,
+    change_user_status,
+    list_vendors,
+    retrieve_user,
+    retrieve_vendor,
+    unblock_user,
+    update_user,
+    users_view,
+)
+from vendly_backend.controllers.admin_bookings_controller import (
+    admin_bookings_list_view,
+    admin_booking_update_view,
+)
+from vendly_backend.controllers.admin_dashboard_controller import (
+    admin_best_performers_view,
+    admin_dashboard_summary_view,
+)
+from vendly_backend.controllers.admin_activity_controller import (
+    admin_activity_logs_view,
+    admin_notifications_activity_view,
+    admin_notification_activity_update_view,
+)
+from vendly_backend.controllers.admin_categories_controller import admin_categories_create_view
+from vendly_backend.controllers.admin_template_types_controller import (
+    admin_template_type_detail_view,
+    admin_template_types_view,
+    template_types_public_view,
 )
 from vendly_backend.controllers.auth_controller import (
-    login_view, logout_view, me_view, register_customer, register_vendor,
+    admin_login_view,
+    confirm_registration_otp,
+    login_view,
+    logout_view,
+    register_customer,
+    register_vendor,
 )
 from vendly_backend.controllers.vendor_controller import vendor_profile_view
 from vendly_backend.controllers.feed_controller import list_posts, post_like, post_comments, comment_like
 from vendly_backend.controllers.bookings_controller import bookings_list_view, booking_detail_view
 from vendly_backend.controllers.reviews_controller import vendor_reviews_view
-from vendly_backend.controllers.messaging_controller import conversations_view, conversation_detail_view, messages_view, read_messages_view
+from vendly_backend.controllers.messaging_controller import (
+    admin_chat_report_update_view,
+    admin_chat_reports_view,
+    conversation_detail_view,
+    conversations_view,
+    messages_view,
+    read_messages_view,
+    report_chat_messages_view,
+)
 from vendly_backend.controllers.invitations_controller import invitation_templates_view, invitations_view, invitation_detail_view
 from vendly_backend.controllers.categories_controller import categories_list_view, category_detail_view
 from vendly_backend.controllers.favorites_controller import favorites_list_view, favorite_vendor_view
@@ -43,10 +82,13 @@ from vendly_backend.controllers.file_upload_controller import file_upload_view
 urlpatterns = [
     path("admin/", admin.site.urls),
     # Auth
+    path("api/admin/login", admin_login_view, name="admin_login"),
+    # Both register views create the user then call _send_registration_otp (SMS to phone/mobile).
     path("api/auth/register/customer", register_customer, name="register_customer"),
     path("api/auth/register/vendor", register_vendor, name="register_vendor"),
+    path("api/auth/confirm-otp", confirm_registration_otp, name="confirm_registration_otp"),
     path("api/auth/login", login_view, name="login"),
-    path("api/users/me", me_view, name="me"),
+    path("api/users", users_view, name="users"),
     path("api/auth/logout", logout_view, name="logout"),
     
     # Profile / Vendor Self-Service
@@ -63,7 +105,7 @@ urlpatterns = [
     path("api/categories/<int:category_id>", category_detail_view),
     
     # Favorites
-    path("api/users/me/favorites", favorites_list_view),
+    path("api/users/favorites", favorites_list_view),
     path("api/vendors/<int:vendor_id>/favorite", favorite_vendor_view),
 
     # Bookings
@@ -78,9 +120,11 @@ urlpatterns = [
     path("api/conversations/<int:conversation_id>", conversation_detail_view),
     path("api/conversations/<int:conversation_id>/messages", messages_view),
     path("api/conversations/<int:conversation_id>/read", read_messages_view),
+    path("api/conversations/<int:conversation_id>/report", report_chat_messages_view),
 
     # Invitations
     path("api/invitations/templates", invitation_templates_view),
+    path("api/invitations/template-types", template_types_public_view),
     path("api/invitations", invitations_view),
     path("api/invitations/<int:invitation_id>", invitation_detail_view),
 
@@ -103,22 +147,45 @@ urlpatterns = [
     path("api/vendor/analytics", vendor_analytics_view),
 
     # Notifications
-    path("api/users/me/notifications", notifications_view),
-    path("api/users/me/notifications/<int:notification_id>/read", read_notification_view),
-    path("api/users/me/notification-settings", notification_settings_view),
+    path("api/users/notifications", notifications_view),
+    path("api/users/notifications/<int:notification_id>/read", read_notification_view),
+    path("api/users/notification-settings", notification_settings_view),
 
     # File Upload
     path("api/upload-file", file_upload_view),
     
     # Admin: users
-    path("api/admin/users", list_users, name="admin_list_users"),
     path("api/admin/users/<int:user_id>", retrieve_user, name="admin_retrieve_user"),
     path("api/admin/users/<int:user_id>/update", update_user, name="admin_update_user"),
-    path("api/admin/users/<int:user_id>/block", block_user, name="admin_block_user"),
-    path("api/admin/users/<int:user_id>/unblock", unblock_user, name="admin_unblock_user"),
+    path("api/admin/users-change-status", change_user_status, name="admin_users_change_status"),
     # Admin: vendors
     path("api/admin/vendors", list_vendors, name="admin_list_vendors"),
     path("api/admin/vendors/<int:vendor_id>", retrieve_vendor, name="admin_retrieve_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/approve", approve_vendor, name="admin_approve_vendor"),
-    path("api/admin/vendors/<int:vendor_id>/reject", reject_vendor, name="admin_reject_vendor"),
+    path("api/admin/vendors-change-status", change_vendor_status, name="admin_vendors_change_status"),
+
+    # Admin: bookings
+    path("api/admin/bookings", admin_bookings_list_view, name="admin_list_bookings"),
+    path("api/admin/bookings/<int:booking_id>", admin_booking_update_view, name="admin_update_booking"),
+
+    # Admin: dashboard
+    path("api/admin/dashboard/summary", admin_dashboard_summary_view, name="admin_dashboard_summary"),
+    path("api/admin/dashboard/best-performers", admin_best_performers_view, name="admin_best_performers"),
+
+    # Admin: activity log (notifications seen/unseen)
+    path("api/admin/activity/logs", admin_activity_logs_view, name="admin_activity_logs"),
+    path("api/admin/activity/notifications", admin_notifications_activity_view, name="admin_activity_notifications"),
+    path(
+        "api/admin/activity/notifications/<int:notification_id>",
+        admin_notification_activity_update_view,
+        name="admin_activity_notification_update",
+    ),
+
+    # Admin: categories
+    path("api/admin/categories", admin_categories_create_view, name="admin_categories_create"),
+    # Admin: chat reports
+    path("api/admin/chat-reports", admin_chat_reports_view, name="admin_chat_reports"),
+    path("api/admin/chat-reports/<int:report_id>", admin_chat_report_update_view, name="admin_chat_report_update"),
+    # Admin: invitation template types
+    path("api/admin/template-types", admin_template_types_view, name="admin_template_types"),
+    path("api/admin/template-types/<int:type_id>", admin_template_type_detail_view, name="admin_template_type_detail"),
 ]

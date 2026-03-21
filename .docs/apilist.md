@@ -86,6 +86,12 @@
 |---|---|---|---|---|---|
 | GET | `categories` | Optional | `?page=1&limit=50` | `{ items: [Category], total }` | All |
 | GET | `categories/:id` | Optional | — | `Category` | All |
+
+### Admin Categories
+> Admin CRUD is **not currently registered** in `vendly_backend/urls.py`. Add routes + controller methods to enable these.
+
+| Method | Path | Auth | Request | Response | Who |
+|---|---|---|---|---|---|
 | POST | `admin/categories` | Admin | `{ name, slug?, description?, sort_order? }` | `Category` | Admin only |
 | PUT | `admin/categories/:id` | Admin | `{ name?, slug?, description?, sort_order? }` | `Category` | Admin only |
 | DELETE | `admin/categories/:id` | Admin | — | 204 | Admin only |
@@ -244,52 +250,34 @@
 
 > All admin endpoints require `role = admin`.
 
-### Users
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/users` | List users (paginated, filter by role) |
-| GET | `admin/users/:id` | User detail |
-| PATCH | `admin/users/:id` | Update user (role, suspend, etc.) |
+### Current Admin Endpoints (wired in `vendly_backend/urls.py`)
 
-### Vendors
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/vendors` | List vendors; filter by `status` |
-| PATCH | `admin/vendors/:id/approve` | Approve vendor (`status = 'approved'`) |
-| PATCH | `admin/vendors/:id/reject` | Reject/suspend vendor |
-| GET | `admin/vendors/:id/subscription` | View vendor's subscription |
-| POST | `admin/vendors/:id/subscription` | Assign/upgrade vendor subscription |
+#### Admin - Users (implemented)
+| Method | Path | Auth | Query Params / Body |
+|---|---|---|---|
+| GET | `admin/users` | Bearer | `role` optional (filter) |
+| GET | `admin/users/:user_id` | Bearer | — |
+| PATCH | `admin/users/:user_id/update` | Bearer | `role_name` optional, `first_name`, `last_name`, `email`, `phone`, `is_active`, `is_verified` |
+| POST | `admin/users/:user_id/block` | Bearer | — |
+| POST | `admin/users/:user_id/unblock` | Bearer | — |
 
-### Content Moderation
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/posts` | List all posts; filter by vendor |
-| DELETE | `admin/posts/:id` | Delete post |
-| GET | `admin/conversations` | List all conversations (paginated) |
-| GET | `admin/conversations/:id/messages` | View messages in conversation |
-| DELETE | `admin/messages/:id` | Delete message |
-| DELETE | `admin/reviews/:id` | Delete vendor review |
+#### Admin - Vendors (implemented)
+| Method | Path | Auth | Query Params / Body |
+|---|---|---|---|
+| GET | `admin/vendors` | Bearer | — |
+| GET | `admin/vendors/:vendor_id` | Bearer | — |
+| POST | `admin/vendors/:vendor_id/approve` | Bearer | — (sets `vendors.status = approved`) |
+| POST | `admin/vendors/:vendor_id/reject` | Bearer | — (sets `vendors.status = rejected`) |
 
-### Categories
-| Method | Path | Description |
+### Required Admin Endpoints (you requested; NOT wired yet)
+| Area | Needed Endpoint(s) | What it should do |
 |---|---|---|
-| POST | `admin/categories` | Create category |
-| PUT | `admin/categories/:id` | Update category |
-| DELETE | `admin/categories/:id` | Delete category |
-
-### Subscriptions
-| Method | Path | Description |
-|---|---|---|
-| POST | `admin/subscription/plans` | Create subscription plan |
-| PUT | `admin/subscription/plans/:id` | Update subscription plan |
-| DELETE | `admin/subscription/plans/:id` | Delete subscription plan |
-
-### Other
-| Method | Path | Description |
-|---|---|---|
-| GET | `admin/bookings` | List all bookings |
-| GET | `admin/invitations` | List all invitations |
-| GET | `admin/notifications` | List or send system notifications |
+| Totals | `GET admin/stats` | Return totals like `users_total`, `vendors_total`, `admins_total` |
+| Categories CRUD | `POST admin/categories`, `PUT admin/categories/:id`, `DELETE admin/categories/:id` | Admin create/update/delete categories |
+| Reviews moderation | `DELETE admin/reviews/:review_id` | Admin delete vendor reviews |
+| Vendor profile approval | Use `POST admin/vendors/:vendor_id/approve` | Admin makes vendor active/approved (already sets vendor status; if you also need `VendorProfile`, implement that too) |
+| Package limit / subscriptions | `POST admin/subscription/plans`, `PUT admin/subscription/plans/:id`, `DELETE admin/subscription/plans/:id` | Admin manages `SubscriptionPlan.max_packages` |
+|  | `POST admin/vendors/:vendor_id/subscription` | Admin assigns/updates vendor subscription (sets `plan_id`, `starts_at`, `ends_at`, `is_active`) |
 
 ---
 
@@ -343,3 +331,140 @@ List endpoints return:
 ---
 
 *API reference generated from `FEATURES_APIS_AND_DATABASE.md`. Update when new endpoints are added or existing ones are modified.*
+
+---
+
+## Generated From `vendly_backend/urls.py` (Methods, Params, Payload)
+
+### Auth
+| Method | Endpoint | Auth | Query Params | Body (request data) |
+|---|---|---|---|---|
+| POST | `/api/auth/register/customer` | None | — | `email` (required, valid email), `phone` (required), `password` (required, min 6), `first_name` (required), `last_name` (optional) |
+| POST | `/api/auth/register/vendor` | None | — | `email` (required), `phone` (required), `password` (required, min 6), `store_name` or `name` (required), `city` (optional), `first_name` (optional), `last_name` (optional) |
+| POST | `/api/auth/login` | None | — | `password` (required), `email` (optional), `phone` (optional) (but at least one of `email`/`phone` must be provided) |
+| GET | `/api/users` | Bearer | `id` (optional), `role` (optional), `status` (optional) | — |
+| PATCH | `/api/users` | Bearer | `id` (optional; defaults to self) | `first_name` (optional), `last_name` (optional), `phone` (optional) |
+| POST | `/api/auth/logout` | Bearer | — | `refresh` (optional) |
+
+### Vendor Self-Service
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/profile` | Bearer (IsVendor) | — | — |
+| PATCH | `/api/vendor/profile` | Bearer (IsVendor) | — | `name` (optional), `city` (optional), `bio` (optional), `price_from` (optional) |
+
+### Feed & Comments
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/feed/posts` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/feed/posts/{post_id}/like` | Bearer | — | — |
+| DELETE | `/api/feed/posts/{post_id}/like` | Bearer | — | — |
+| GET | `/api/feed/posts/{post_id}/comments` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/feed/posts/{post_id}/comments` | Bearer | — | `text` (required), `parent_id` (optional) |
+| POST | `/api/feed/comments/{comment_id}/like` | Bearer | — | — |
+
+### Categories
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/categories` | None | `page`=1, `limit`=50 | — |
+| GET | `/api/categories/{category_id}` | None | — | — |
+
+### Favorites
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/users/favorites` | Bearer | `id` (optional), `page`=1, `limit`=20 | — |
+| POST | `/api/vendors/{vendor_id}/favorite` | Bearer | — | — |
+| DELETE | `/api/vendors/{vendor_id}/favorite` | Bearer | — | — |
+
+### Bookings
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/bookings` | Bearer | `page`=1, `limit`=20, `status` (optional) | — |
+| POST | `/api/bookings` | Bearer | — | `vendor_id` (required), `event_type` (required), `booking_date` (required), `location` (optional), `amount` (optional), `deposit` (optional) |
+| GET | `/api/bookings/{booking_id}` | Bearer | — | — |
+| PATCH | `/api/bookings/{booking_id}` | Bearer | — | `status` (required; one of `pending`, `confirmed`, `completed`, `cancelled`) |
+
+### Vendor Reviews (by vendor_id)
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendors/{vendor_id}/reviews` | None (AllowAny) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendors/{vendor_id}/reviews` | AllowAny (POST requires Bearer inside) | — | `booking_id` (required), `rating` (required), `comment` (optional) |
+
+### Messaging / Conversations
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/conversations` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/conversations` | Bearer | — | `partner_id` (required) |
+| GET | `/api/conversations/{conversation_id}` | Bearer | — | — |
+| DELETE | `/api/conversations/{conversation_id}` | Bearer | — | — |
+| GET | `/api/conversations/{conversation_id}/messages` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/conversations/{conversation_id}/messages` | Bearer | — | `text` (optional), `attachment_url` (optional) but at least one must be present |
+| PATCH | `/api/conversations/{conversation_id}/read` | Bearer | — | — |
+
+### Invitations
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/invitations/templates` | Bearer | `page`=1, `limit`=20, `type` (optional) | — |
+| GET | `/api/invitations` | Bearer | `page`=1, `limit`=20 | — |
+| POST | `/api/invitations` | Bearer | — | `invitation_type` (required), `event_type` (required), `answers` (optional; default `{}`), `template_id` (optional) |
+| GET | `/api/invitations/{invitation_id}` | Bearer | — | — |
+| DELETE | `/api/invitations/{invitation_id}` | Bearer | — | — |
+
+### Vendor - Listings (self)
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/listings` | Bearer (IsVendor) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendor/listings` | Bearer (IsVendor) | — | `title` (required), `description` (optional), `price` (optional), `category` (optional) |
+| PUT | `/api/vendor/listings/{listing_id}` | Bearer (IsVendor) | — | `title` (optional), `description` (optional), `price` (optional), `category` (optional) |
+| DELETE | `/api/vendor/listings/{listing_id}` | Bearer (IsVendor) | — | — |
+
+### Vendor - Posts (self)
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/posts` | Bearer (IsVendor) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendor/posts` | Bearer (IsVendor) | — | `caption` (optional; default `""`), `media` (optional; list of `{ url, is_video?, sort_order? }` where `url` is required per item) |
+| DELETE | `/api/vendor/posts/{post_id}` | Bearer (IsVendor) | — | — |
+
+### Vendor - Packages
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendors/{vendor_id}/packages` | None (AllowAny) | `page`=1, `limit`=20 | — |
+| GET | `/api/vendor/packages` | Bearer (IsVendor) | `page`=1, `limit`=20 | — |
+| POST | `/api/vendor/packages` | Bearer (IsVendor) | — | `name` (required), `price` (required), `features_text` (optional), `features_json` (optional), `is_active` (optional; default `true`) |
+| PUT | `/api/vendor/packages/{package_id}` | Bearer (IsVendor) | — | `name` (optional), `price` (optional), `features_text` (optional), `features_json` (optional), `is_active` (optional) |
+| DELETE | `/api/vendor/packages/{package_id}` | Bearer (IsVendor) | — | — |
+
+### Vendor - Subscription
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/subscription` | Bearer (IsVendor) | — | — |
+| GET | `/api/subscription/plans` | Bearer | `page`=1, `limit`=20 | — |
+
+### Vendor - Analytics
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/vendor/analytics` | Bearer (IsVendor) | `from` (optional), `to` (optional) | — |
+
+### Notifications
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/users/notifications` | Bearer | `id` (optional), `page`=1, `limit`=20 | — |
+| PATCH | `/api/users/notifications/{notification_id}/read` | Bearer | `id` (optional) | — |
+| PATCH | `/api/users/notification-settings` | Bearer | `id` (optional) | `push` (optional), `email` (optional) |
+
+### Admin
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| GET | `/api/admin/users/{user_id}` | Bearer (IsAdmin) | — | — |
+| PATCH | `/api/admin/users/{user_id}/update` | Bearer (IsAdmin) | — | `role_name` (optional), `first_name` (optional), `last_name` (optional), `email` (optional), `phone` (optional), `is_active` (optional), `is_verified` (optional) |
+| POST | `/api/admin/users/{user_id}/block` | Bearer (IsAdmin) | — | — |
+| POST | `/api/admin/users/{user_id}/unblock` | Bearer (IsAdmin) | — | — |
+| GET | `/api/admin/vendors` | Bearer (IsAdmin) | — | — |
+| GET | `/api/admin/vendors/{vendor_id}` | Bearer (IsAdmin) | — | — |
+| POST | `/api/admin/vendors/{vendor_id}/approve` | Bearer (IsAdmin) | — | — |
+| POST | `/api/admin/vendors/{vendor_id}/reject` | Bearer (IsAdmin) | — | — |
+
+### File Upload
+| Method | Endpoint | Auth | Query Params | Body |
+|---|---|---|---|---|
+| POST | `/api/upload-file` | Bearer | — | multipart `file` (required), `path` (optional; folder/key prefix) |
+

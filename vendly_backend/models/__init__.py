@@ -5,5 +5,5 @@ from .vendors import Category, Vendor, VendorGallery, Listing, SubscriptionPlan,
 from .feed import Post, PostMedia, PostLike, Comment, CommentLike
 from .bookings import Booking, VendorReview
 from .messaging import Conversation, ConversationParticipant, Message, MessageReadReceipt
-from .invitations import InvitationTemplate, Invitation
+from .invitations import InvitationTemplate, Invitation, InvitationTemplateType
 from .interactions import UserFavoriteVendor, VendorView, AuditLog

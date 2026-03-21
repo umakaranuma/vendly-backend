@@ -39,6 +39,7 @@ from vendly_backend.controllers.admin_activity_controller import (
 )
 from vendly_backend.controllers.admin_categories_controller import admin_categories_create_view
 from vendly_backend.controllers.auth_controller import (
+    admin_login_view,
     confirm_registration_otp,
     login_view,
     logout_view,
@@ -64,6 +65,7 @@ from vendly_backend.controllers.file_upload_controller import file_upload_view
 urlpatterns = [
     path("admin/", admin.site.urls),
     # Auth
+    path("api/admin/login", admin_login_view, name="admin_login"),
     path("api/auth/register/customer", register_customer, name="register_customer"),
     path("api/auth/register/vendor", register_vendor, name="register_vendor"),
     path("api/auth/confirm-otp", confirm_registration_otp, name="confirm_registration_otp"),

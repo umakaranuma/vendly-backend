@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 from datetime import timedelta
 
 import mServices.ResponseService as ResponseService
@@ -13,7 +14,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from mServices.ValidatorService import ValidatorService
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -46,8 +47,49 @@ def _otp_cache_key(user_id: int) -> str:
     return f"{OTP_CACHE_PREFIX}:{user_id}"
 
 
+def _phone_from_registration_data(data) -> str | None:
+    """Resolve `phone` or `mobile` so OTP SMS targets the number the client sent (customer + vendor register)."""
+    return (data.get("phone") or data.get("mobile") or "").strip() or None
+
+
+def _data_with_phone_for_validation(data, phone: str | None):
+    """Merge resolved phone into the payload so `phone|required` passes when only `mobile` was sent."""
+    if isinstance(data, dict):
+        merged = dict(data)
+        if phone is not None:
+            merged["phone"] = phone
+        return merged
+    if hasattr(data, "copy"):
+        merged = data.copy()
+        if phone is not None:
+            merged["phone"] = phone
+        return merged
+    return data
+
+
 def _generate_otp() -> str:
     return f"{random.randint(100000, 999999)}"
+
+
+def _normalize_phone_for_sms(phone: str) -> str:
+    """
+    Pingram SMS delivery expects a proper mobile destination. Prefer E.164 (e.g. +919876543210).
+    Do not pass the phone as Pingram `to.id` — that field is a user id and can resolve the wrong recipient.
+    """
+    raw = (phone or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("+"):
+        digits = re.sub(r"\D", "", raw[1:])
+        return f"+{digits}" if digits else ""
+    digits_only = re.sub(r"\D", "", raw)
+    if not digits_only:
+        return ""
+    if len(digits_only) == 12 and digits_only.startswith("91"):
+        return f"+{digits_only}"
+    if len(digits_only) == 10 and digits_only[0] in "6789":
+        return f"+91{digits_only}"
+    return f"+{digits_only}"
 
 
 async def _send_pingram_sms(phone: str, otp_code: str) -> None:
@@ -56,6 +98,10 @@ async def _send_pingram_sms(phone: str, otp_code: str) -> None:
     if Pingram is None:
         raise RuntimeError("pingram-python package is not installed.")
 
+    to_number = _normalize_phone_for_sms(phone)
+    if not to_number:
+        raise RuntimeError("Phone number is missing; cannot send OTP SMS.")
+
     async with Pingram(
         api_key=settings.PINGRAM_API_KEY,
         base_url=settings.PINGRAM_BASE_URL,
@@ -63,21 +109,20 @@ async def _send_pingram_sms(phone: str, otp_code: str) -> None:
         response = await client.send(
             {
                 "type": "alert",
-                "to": {
-                    "id": phone,
-                    "number": phone,
-                },
+                # Only `number` for ad-hoc SMS — `id` is a Pingram user id and can target the wrong contact.
+                "to": {"number": to_number},
+                "forceChannels": ["SMS"],
                 "sms": {
                     "message": f"Your verification code is: {otp_code}. Reply STOP to opt-out.",
                 },
             }
         )
-        # Pingram may return a tracking id while not creating an SMS message.
-        # Treat empty messages as a failed send so registration does not report OTP sent.
-        if not getattr(response, "messages", None):
-            raise RuntimeError(
-                f"Pingram did not queue SMS. tracking_id={getattr(response, 'tracking_id', None)}"
-            )
+        tracking_id = getattr(response, "tracking_id", None)
+        messages = getattr(response, "messages", None) or []
+        # Pingram can acknowledge accepted delivery with tracking_id even when messages is empty.
+        # Fail only when both tracking metadata and messages are missing.
+        if not tracking_id and not messages:
+            raise RuntimeError("Pingram did not return tracking_id/messages for OTP SMS.")
 
 
 def _send_registration_otp(user: CoreUser) -> None:
@@ -115,18 +160,19 @@ def _user_payload(user: CoreUser) -> dict:
 
 
 @api_view(["POST"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def register_customer(request: Request) -> Response:
     data = request.data
     email = (data.get("email") or "").strip() or None
-    phone = (data.get("phone") or "").strip() or None
+    phone = _phone_from_registration_data(data)
     password = data.get("password") or ""
     first_name = data.get("first_name", "")
     last_name = data.get("last_name", "")
 
     # Validate required fields via ValidatorService
     errors = ValidatorService.validate(
-        data,
+        _data_with_phone_for_validation(data, phone),
         rules={
             "email": "required|email",
             "phone": "required",
@@ -204,11 +250,12 @@ def register_customer(request: Request) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def register_vendor(request: Request) -> Response:
     data = request.data
     email = (data.get("email") or "").strip() or None
-    phone = (data.get("phone") or "").strip() or None
+    phone = _phone_from_registration_data(data)
     password = data.get("password") or ""
     first_name = data.get("first_name", "")
     last_name = data.get("last_name", "")
@@ -218,7 +265,7 @@ def register_vendor(request: Request) -> Response:
 
     # Validate required vendor fields via ValidatorService
     errors = ValidatorService.validate(
-        data,
+        _data_with_phone_for_validation(data, phone),
         rules={
             "email": "required|email",
             "phone": "required",
@@ -312,6 +359,7 @@ def register_vendor(request: Request) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def login_view(request: Request) -> Response:
     data = request.data
@@ -389,6 +437,7 @@ def login_view(request: Request) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def admin_login_view(request: Request) -> Response:
     """
@@ -470,6 +519,7 @@ def admin_login_view(request: Request) -> Response:
 
 
 @api_view(["POST"])
+@authentication_classes([])
 @permission_classes([AllowAny])
 def confirm_registration_otp(request: Request) -> Response:
     data = request.data

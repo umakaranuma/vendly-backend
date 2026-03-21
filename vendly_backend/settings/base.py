@@ -10,6 +10,10 @@ DEBUG = True
 
 ALLOWED_HOSTS: list[str] = ["*"]
 
+# Comma-separated list, e.g. "http://localhost:3000,https://app.example.com"
+_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
+CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -17,6 +21,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',
     'vendly_backend',
@@ -24,6 +29,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

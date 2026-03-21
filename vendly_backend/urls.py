@@ -42,7 +42,10 @@ from vendly_backend.controllers.admin_activity_controller import (
     admin_notifications_activity_view,
     admin_notification_activity_update_view,
 )
-from vendly_backend.controllers.admin_categories_controller import admin_categories_create_view
+from vendly_backend.controllers.admin_categories_controller import (
+    admin_categories_view,
+    admin_category_detail_view,
+)
 from vendly_backend.controllers.admin_template_types_controller import (
     admin_template_type_detail_view,
     admin_template_types_view,
@@ -194,8 +197,13 @@ urlpatterns = [
         name="admin_activity_notification_update",
     ),
 
-    # Admin: categories
-    path("api/admin/categories", admin_categories_create_view, name="admin_categories_create"),
+    # Admin: categories (list + create, detail + update + delete)
+    path("api/admin/categories", admin_categories_view, name="admin_categories"),
+    path(
+        "api/admin/categories/<int:category_id>",
+        admin_category_detail_view,
+        name="admin_category_detail",
+    ),
     # Admin: chat reports
     path("api/admin/chat-reports", admin_chat_reports_view, name="admin_chat_reports"),
     path("api/admin/chat-reports/<int:report_id>", admin_chat_report_update_view, name="admin_chat_report_update"),

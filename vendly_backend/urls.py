@@ -15,6 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.http import JsonResponse, HttpResponse
 from django.urls import path
 
 from vendly_backend.controllers.admin_controller import (
@@ -79,7 +80,19 @@ from vendly_backend.controllers.vendor_analytics_controller import vendor_analyt
 from vendly_backend.controllers.notifications_controller import notifications_view, read_notification_view, notification_settings_view
 from vendly_backend.controllers.file_upload_controller import file_upload_view
 
+
+def root_health_view(_request):
+    return JsonResponse({"status": "ok", "service": "vendly_backend"}, status=200)
+
+
+def favicon_view(_request):
+    # Return empty success so browser favicon probes do not create noisy 404 logs.
+    return HttpResponse(status=204)
+
+
 urlpatterns = [
+    path("", root_health_view, name="root_health"),
+    path("favicon.ico", favicon_view, name="favicon"),
     path("admin/", admin.site.urls),
     # Auth
     path("api/admin/login", admin_login_view, name="admin_login"),
@@ -110,6 +123,7 @@ urlpatterns = [
 
     # Bookings
     path("api/bookings", bookings_list_view),
+    path("api/booking", bookings_list_view),  # backward-compatible alias
     path("api/bookings/<int:booking_id>", booking_detail_view),
 
     # Reviews

@@ -32,13 +32,21 @@ from vendly_backend.controllers.admin_bookings_controller import (
     admin_bookings_list_view,
     admin_booking_update_view,
 )
-from vendly_backend.controllers.admin_dashboard_controller import admin_dashboard_summary_view
+from vendly_backend.controllers.admin_dashboard_controller import (
+    admin_best_performers_view,
+    admin_dashboard_summary_view,
+)
 from vendly_backend.controllers.admin_activity_controller import (
     admin_activity_logs_view,
     admin_notifications_activity_view,
     admin_notification_activity_update_view,
 )
 from vendly_backend.controllers.admin_categories_controller import admin_categories_create_view
+from vendly_backend.controllers.admin_template_types_controller import (
+    admin_template_type_detail_view,
+    admin_template_types_view,
+    template_types_public_view,
+)
 from vendly_backend.controllers.auth_controller import (
     admin_login_view,
     confirm_registration_otp,
@@ -107,6 +115,7 @@ urlpatterns = [
 
     # Invitations
     path("api/invitations/templates", invitation_templates_view),
+    path("api/invitations/template-types", template_types_public_view),
     path("api/invitations", invitations_view),
     path("api/invitations/<int:invitation_id>", invitation_detail_view),
 
@@ -151,6 +160,7 @@ urlpatterns = [
 
     # Admin: dashboard
     path("api/admin/dashboard/summary", admin_dashboard_summary_view, name="admin_dashboard_summary"),
+    path("api/admin/dashboard/best-performers", admin_best_performers_view, name="admin_best_performers"),
 
     # Admin: activity log (notifications seen/unseen)
     path("api/admin/activity/logs", admin_activity_logs_view, name="admin_activity_logs"),
@@ -163,4 +173,7 @@ urlpatterns = [
 
     # Admin: categories
     path("api/admin/categories", admin_categories_create_view, name="admin_categories_create"),
+    # Admin: invitation template types
+    path("api/admin/template-types", admin_template_types_view, name="admin_template_types"),
+    path("api/admin/template-types/<int:type_id>", admin_template_type_detail_view, name="admin_template_type_detail"),
 ]

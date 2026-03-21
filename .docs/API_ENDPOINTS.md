@@ -55,26 +55,32 @@ Admin list response is paginated and returned through `ResponseService`.
 
 #### `GET /api/users` (non-admin user)
 
-Returns the authenticated user's profile object.
+Returns the same paginated/list format as admin, filtered to the authenticated user.
 
 ```json
 {
   "is_success": true,
-  "message": "User fetched successfully.",
+  "message": "Users fetched successfully.",
   "result": {
-    "id": 7,
-    "email": "user@example.com",
-    "phone": "+919999999999",
-    "first_name": "Test",
-    "last_name": "User",
-    "is_active": true,
-    "is_verified": true,
-    "status": "active",
-    "role": {
-      "id": 2,
-      "name": "CUSTOMER",
-      "description": ""
-    }
+    "total_records": 1,
+    "per_page": 20,
+    "current_page": 1,
+    "last_page": 1,
+    "data": [
+      {
+        "id": 7,
+        "email": "user@example.com",
+        "phone": "+919999999999",
+        "first_name": "Test",
+        "last_name": "User",
+        "is_active": true,
+        "is_verified": true,
+        "role_id": 2,
+        "role_name": "CUSTOMER",
+        "role_description": "",
+        "status": "active"
+      }
+    ]
   },
   "system_code": 200
 }

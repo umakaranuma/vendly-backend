@@ -22,6 +22,31 @@ class CoreRole(models.Model):
         return self.name
 
 
+class CoreStatus(models.Model):
+    """
+    Centralized status registry used by admin “cards”.
+
+    Example:
+    - name="pending", status_type="vendor_pending", entity_type="vendor"
+    - name="active", status_type="customer_active", entity_type="customer"
+    """
+
+    entity_type = models.CharField(max_length=20)  # "customer" | "vendor"
+    name = models.CharField(max_length=50)
+    status_type = models.CharField(max_length=100, unique=True)  # e.g. "vendor_pending"
+    sort_order = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "core_statuses"
+        app_label = "vendly_backend"
+
+    def __str__(self) -> str:
+        return f"{self.entity_type}:{self.status_type}"
+
+
 class CoreUserManager(BaseUserManager):
     def _create_user(self, email: str | None, phone: str | None, password: str | None, **extra_fields):
         if not email and not phone:
@@ -72,6 +97,16 @@ class CoreUser(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
+
+    # Admin status “card” backing column (normalized). Kept optional to avoid breaking existing data.
+    status_ref = models.ForeignKey(
+        CoreStatus,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="core_users",
+        db_column="status_id",
+    )
 
     role = models.ForeignKey(CoreRole, on_delete=models.SET_NULL, null=True, blank=True, related_name="users")
 

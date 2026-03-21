@@ -6,6 +6,7 @@ from rest_framework import status
 
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
+from vendly_backend.activity_log import log_activity
 from vendly_backend.models import Booking, Vendor
 
 @api_view(["GET", "POST"])
@@ -68,6 +69,33 @@ def bookings_list_view(request: Request) -> Response:
             deposit=deposit,
             status="pending"
         )
+        log_activity(
+            actor=user,
+            category="booking",
+            event="created",
+            resource_type="booking",
+            resource_id=booking.id,
+            payload={
+                "vendor_id": vendor.id,
+                "booking_status": booking.status,
+                "amount": str(booking.amount) if booking.amount is not None else None,
+                "deposit": str(booking.deposit) if booking.deposit is not None else None,
+            },
+        )
+
+        if booking.amount is not None or booking.deposit is not None:
+            log_activity(
+                actor=user,
+                category="payment",
+                event="booking_amount_recorded",
+                resource_type="booking",
+                resource_id=booking.id,
+                payload={
+                    "amount": str(booking.amount) if booking.amount is not None else None,
+                    "deposit": str(booking.deposit) if booking.deposit is not None else None,
+                },
+            )
+
         payload = {
             "id": booking.id,
             "status": booking.status,
@@ -115,5 +143,23 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
 
         booking.status = new_status
         booking.save(update_fields=["status", "updated_at"])
+        log_activity(
+            actor=user,
+            category="booking",
+            event="status_updated",
+            resource_type="booking",
+            resource_id=booking.id,
+            payload={"status": booking.status},
+        )
+
+        if booking.status == "completed":
+            log_activity(
+                actor=user,
+                category="payment",
+                event="booking_completed",
+                resource_type="booking",
+                resource_id=booking.id,
+                payload={"amount": str(booking.amount) if booking.amount is not None else None},
+            )
         
         return ResponseService.response("SUCCESS", {"id": booking.id, "status": booking.status}, "Booking updated successfully.")

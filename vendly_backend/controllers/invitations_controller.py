@@ -15,16 +15,37 @@ def invitation_templates_view(request: Request) -> Response:
     try:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 20))
-        template_type = request.GET.get("type", "")
-        
-        query = QueryBuilderService("invitation_templates")
-        if template_type:
-            query = query.apply_conditions(f'{{"invitation_type": "{template_type}"}}', ["invitation_type"], "", [])
-            
+        template_type = (request.GET.get("type") or "").strip()
         query = (
-            query
-            .select("invitation_templates.id", "invitation_templates.name", "invitation_templates.description", "invitation_templates.style", "invitation_templates.icon", "invitation_templates.invitation_type")
-            .paginate(page, limit, ["invitation_templates.sort_order"], "invitation_templates.sort_order", "asc")
+            QueryBuilderService("invitation_templates")
+            .select(
+                "invitation_templates.id",
+                "invitation_templates.name",
+                "invitation_templates.description",
+                "invitation_templates.style",
+                "invitation_templates.icon",
+                "invitation_templates.invitation_type_id",
+                "invitation_template_types.type_key as invitation_type",
+            )
+            .leftJoin(
+                "invitation_template_types",
+                "invitation_template_types.id",
+                "invitation_templates.invitation_type_id",
+            )
+        )
+        if template_type:
+            query = query.apply_conditions(
+                f'{{"invitation_template_types.type_key": "{template_type}"}}',
+                ["invitation_template_types.type_key"],
+                "",
+                [],
+            )
+        query = query.paginate(
+            page,
+            limit,
+            ["invitation_templates.sort_order", "invitation_templates.id"],
+            "invitation_templates.sort_order",
+            "asc",
         )
         return ResponseService.response("SUCCESS", query, "Templates retrieved successfully.")
     except Exception as e:

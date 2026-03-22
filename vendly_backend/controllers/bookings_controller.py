@@ -15,8 +15,10 @@ from vendly_backend.booking_statuses import (
     ALLOWED_BOOKING_STATUS_NAMES,
     ALLOWED_BOOKING_STATUS_TYPES,
     get_booking_status_ref,
+    get_booking_status_ref_by_status_type,
 )
 from vendly_backend.models import Booking, Vendor, VendorPackage
+from vendly_backend.permissions import is_admin_user
 
 
 def _vendor_for_user(user):
@@ -41,6 +43,53 @@ def _vendor_booking_side(user, vendor_profile: Vendor | None, booking: Booking):
     if booking.vendor_id == vendor_profile.id:
         return "received"
     return None
+
+
+def _can_change_booking_status(user, booking: Booking) -> bool:
+    if is_admin_user(user):
+        return True
+    return booking.vendor.user_id == user.id
+
+
+def _resolve_booking_status_from_request_data(data: dict):
+    raw_type = (data.get("status_type") or "").strip()
+    raw_name = (data.get("status") or "").strip()
+    if raw_type and raw_name:
+        ref_t = get_booking_status_ref_by_status_type(raw_type)
+        ref_n = get_booking_status_ref(raw_name)
+        if ref_t.id != ref_n.id:
+            raise ValueError("status and status_type do not match")
+        return ref_t
+    if raw_type:
+        return get_booking_status_ref_by_status_type(raw_type)
+    if raw_name:
+        return get_booking_status_ref(raw_name)
+    raise ValueError("Provide status or status_type")
+
+
+def _persist_booking_status_and_log(booking: Booking, user, status_ref, *, admin_actor: bool):
+    booking.status = status_ref
+    booking.save(update_fields=["status", "updated_at"])
+    status_name = booking.status.name if booking.status else None
+    status_type = booking.status.status_type if booking.status else None
+    log_activity(
+        actor=user,
+        category="booking",
+        event="admin_status_updated" if admin_actor else "status_updated",
+        resource_type="booking",
+        resource_id=booking.id,
+        payload={"status": status_name, "status_type": status_type},
+    )
+    if status_name == "completed":
+        log_activity(
+            actor=user,
+            category="payment",
+            event="booking_completed",
+            resource_type="booking",
+            resource_id=booking.id,
+            payload={"amount": str(booking.amount) if booking.amount is not None else None},
+        )
+    return status_name, status_type
 
 
 def _serialize_booking_list_row(booking: Booking, user, vendor_profile):
@@ -244,7 +293,50 @@ def bookings_list_view(request: Request) -> Response:
         }
         return ResponseService.response("SUCCESS", payload, "Booking created successfully.", status.HTTP_201_CREATED)
 
-@api_view(["GET", "PATCH"])
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def booking_status_change_view(request: Request, booking_id: int) -> Response:
+    """Update booking status. Allowed: admin, or the vendor whose service is booked."""
+    try:
+        status_ref = _resolve_booking_status_from_request_data(request.data)
+    except ValueError as e:
+        msg = str(e)
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            {"detail": [msg]},
+            "Validation error",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        booking = Booking.objects.select_related("status", "vendor").get(id=booking_id)
+    except Booking.DoesNotExist:
+        return ResponseService.response("NOT_FOUND", {}, "Booking not found.", status.HTTP_404_NOT_FOUND)
+
+    user = request.user
+    if not _can_change_booking_status(user, booking):
+        return ResponseService.response(
+            "FORBIDDEN",
+            {"detail": "Only administrators or the booked vendor can change booking status."},
+            "Forbidden",
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    admin_actor = is_admin_user(user)
+    status_name, status_type = _persist_booking_status_and_log(booking, user, status_ref, admin_actor=admin_actor)
+    return ResponseService.response(
+        "SUCCESS",
+        {
+            "id": booking.id,
+            "status": status_name,
+            "status_type": status_type,
+            "status_id": booking.status_id,
+        },
+        "Booking status updated successfully.",
+    )
+
+
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def booking_detail_view(request: Request, booking_id: int) -> Response:
     try:
@@ -262,56 +354,22 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
 
     vendor_profile = _vendor_for_user(request.user)
 
-    if request.method == "GET":
-        payload = {
-            "id": booking.id,
-            "customer_id": booking.customer_id,
-            "vendor_id": booking.vendor_id,
-            "package_id": booking.vendor_package_id,
-            "event_type": booking.event_type,
-            "booking_date": booking.booking_date,
-            "location": booking.location,
-            "amount": str(booking.amount) if booking.amount else None,
-            "deposit": str(booking.deposit) if booking.deposit else None,
-            "status": booking.status.name if booking.status else None,
-            "status_type": booking.status.status_type if booking.status else None,
-            "status_id": booking.status_id,
-            "requested_by_id": booking.requested_by_id,
-            "vendor_booking_side": _vendor_booking_side(request.user, vendor_profile, booking),
-            "created_at": booking.created_at,
-            "updated_at": booking.updated_at,
-        }
-        return ResponseService.response("SUCCESS", payload, "Booking fetched successfully.")
-
-    elif request.method == "PATCH":
-        new_status = request.data.get("status")
-        if new_status not in ALLOWED_BOOKING_STATUS_NAMES:
-            return ResponseService.response("BAD_REQUEST", {"detail": "Invalid status."}, "Validation error", status.HTTP_400_BAD_REQUEST)
-
-        booking.status = get_booking_status_ref(new_status)
-        booking.save(update_fields=["status", "updated_at"])
-        status_name = booking.status.name if booking.status else None
-        log_activity(
-            actor=request.user,
-            category="booking",
-            event="status_updated",
-            resource_type="booking",
-            resource_id=booking.id,
-            payload={"status": status_name},
-        )
-
-        if status_name == "completed":
-            log_activity(
-                actor=request.user,
-                category="payment",
-                event="booking_completed",
-                resource_type="booking",
-                resource_id=booking.id,
-                payload={"amount": str(booking.amount) if booking.amount is not None else None},
-            )
-
-        return ResponseService.response(
-            "SUCCESS",
-            {"id": booking.id, "status": status_name, "status_id": booking.status_id},
-            "Booking updated successfully.",
-        )
+    payload = {
+        "id": booking.id,
+        "customer_id": booking.customer_id,
+        "vendor_id": booking.vendor_id,
+        "package_id": booking.vendor_package_id,
+        "event_type": booking.event_type,
+        "booking_date": booking.booking_date,
+        "location": booking.location,
+        "amount": str(booking.amount) if booking.amount else None,
+        "deposit": str(booking.deposit) if booking.deposit else None,
+        "status": booking.status.name if booking.status else None,
+        "status_type": booking.status.status_type if booking.status else None,
+        "status_id": booking.status_id,
+        "requested_by_id": booking.requested_by_id,
+        "vendor_booking_side": _vendor_booking_side(request.user, vendor_profile, booking),
+        "created_at": booking.created_at,
+        "updated_at": booking.updated_at,
+    }
+    return ResponseService.response("SUCCESS", payload, "Booking fetched successfully.")

@@ -29,4 +29,21 @@ def get_booking_status_ref(name: str):
     status_type = BOOKING_STATUS_TYPE_BY_NAME.get(key)
     if not status_type:
         raise ValueError(f"Invalid booking status: {name!r}")
-    return CoreStatus.objects.get(status_type=status_type)
+
+    try:
+        return CoreStatus.objects.get(status_type=status_type, entity_type="booking")
+    except CoreStatus.DoesNotExist as exc:
+        raise ValueError(f"Invalid booking status: {name!r}") from exc
+
+
+def get_booking_status_ref_by_status_type(status_type: str):
+    """Resolve CoreStatus by ``status_type`` (e.g. booking_confirmed)."""
+    from vendly_backend.models import CoreStatus
+
+    key = (status_type or "").strip()
+    if key not in ALLOWED_BOOKING_STATUS_TYPES:
+        raise ValueError(f"Invalid booking status_type: {key!r}")
+    try:
+        return CoreStatus.objects.get(status_type=key, entity_type="booking")
+    except CoreStatus.DoesNotExist as exc:
+        raise ValueError(f"Invalid booking status_type: {key!r}") from exc

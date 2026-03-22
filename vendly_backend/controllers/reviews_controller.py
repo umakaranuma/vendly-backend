@@ -110,7 +110,7 @@ def vendor_reviews_view(request: Request, vendor_id: int) -> Response:
             return ResponseService.response("BAD_REQUEST", {"detail": "booking_id and rating are required."}, "Validation error", status.HTTP_400_BAD_REQUEST)
 
         try:
-            booking = Booking.objects.get(id=booking_id)
+            booking = Booking.objects.select_related("status").get(id=booking_id)
         except Booking.DoesNotExist:
             return ResponseService.response("NOT_FOUND", {"detail": "Booking not found."}, "Validation error", status.HTTP_404_NOT_FOUND)
 
@@ -125,7 +125,7 @@ def vendor_reviews_view(request: Request, vendor_id: int) -> Response:
         if booking.vendor_id != vendor.id:
             return ResponseService.response("BAD_REQUEST", {"detail": "Booking vendor mismatch."}, "Validation error", status.HTTP_400_BAD_REQUEST)
 
-        if booking.status != "completed":
+        if not booking.status or booking.status.name != "completed":
             return ResponseService.response("BAD_REQUEST", {"detail": "Booking is not completed."}, "Validation error", status.HTTP_400_BAD_REQUEST)
 
         if hasattr(booking, "review"):

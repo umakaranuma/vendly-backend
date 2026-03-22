@@ -1,6 +1,6 @@
 from django.db import models
 
-from vendly_backend.models.core import CoreUser
+from vendly_backend.models.core import CoreStatus, CoreUser
 from vendly_backend.models.vendors import Vendor
 
 
@@ -12,14 +12,13 @@ class Booking(models.Model):
     location = models.CharField(max_length=255, null=True, blank=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     deposit = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    
-    STATUS_CHOICES = (
-        ('pending', 'Pending'),
-        ('confirmed', 'Confirmed'),
-        ('completed', 'Completed'),
-        ('cancelled', 'Cancelled')
+
+    status = models.ForeignKey(
+        CoreStatus,
+        on_delete=models.PROTECT,
+        related_name="bookings",
     )
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -7,6 +7,7 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.activity_log import log_activity
+from vendly_backend.booking_statuses import ALLOWED_BOOKING_STATUS_NAMES, get_booking_status_ref
 from vendly_backend.models import Booking, Vendor
 
 @api_view(["GET", "POST"])
@@ -23,12 +24,31 @@ def bookings_list_view(request: Request) -> Response:
             query = QueryBuilderService("bookings")
 
             if booking_status:
-                query = query.apply_conditions(f'{{"status": "{booking_status}"}}', ["status"], "", [])
+                if booking_status not in ALLOWED_BOOKING_STATUS_NAMES:
+                    return ResponseService.response(
+                        "BAD_REQUEST",
+                        {"status": ["Invalid status filter."]},
+                        "Validation error",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
+                sid = get_booking_status_ref(booking_status).id
+                query = query.apply_conditions(f'{{"status_id": {sid}}}', ["status_id"], "", [])
 
             query = (
-                query.select("bookings.id", "bookings.event_type", "bookings.booking_date", "bookings.location", "bookings.amount", "bookings.status", "core_users.first_name", "core_users.last_name", "vendors.name as vendor_name")
+                query.select(
+                    "bookings.id",
+                    "bookings.event_type",
+                    "bookings.booking_date",
+                    "bookings.location",
+                    "bookings.amount",
+                    "core_statuses.name as status",
+                    "core_users.first_name",
+                    "core_users.last_name",
+                    "vendors.name as vendor_name",
+                )
                 .leftJoin("core_users", "core_users.id", "bookings.customer_id")
                 .leftJoin("vendors", "vendors.id", "bookings.vendor_id")
+                .leftJoin("core_statuses", "core_statuses.id", "bookings.status_id")
                 .paginate(page, limit, ["bookings.created_at"], "bookings.created_at", "desc")
             )
             return ResponseService.response("SUCCESS", query, "Bookings retrieved successfully.")
@@ -60,7 +80,7 @@ def bookings_list_view(request: Request) -> Response:
             location=location,
             amount=amount,
             deposit=deposit,
-            status="pending"
+            status=get_booking_status_ref("pending"),
         )
         log_activity(
             actor=user,
@@ -70,7 +90,7 @@ def bookings_list_view(request: Request) -> Response:
             resource_id=booking.id,
             payload={
                 "vendor_id": vendor.id,
-                "booking_status": booking.status,
+                "booking_status": booking.status.name if booking.status else None,
                 "amount": str(booking.amount) if booking.amount is not None else None,
                 "deposit": str(booking.deposit) if booking.deposit is not None else None,
             },
@@ -91,10 +111,11 @@ def bookings_list_view(request: Request) -> Response:
 
         payload = {
             "id": booking.id,
-            "status": booking.status,
+            "status": booking.status.name if booking.status else None,
+            "status_id": booking.status_id,
             "event_type": booking.event_type,
             "booking_date": booking.booking_date,
-            "vendor_id": booking.vendor.id
+            "vendor_id": booking.vendor.id,
         }
         return ResponseService.response("SUCCESS", payload, "Booking created successfully.", status.HTTP_201_CREATED)
 
@@ -102,7 +123,7 @@ def bookings_list_view(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def booking_detail_view(request: Request, booking_id: int) -> Response:
     try:
-        booking = Booking.objects.get(id=booking_id)
+        booking = Booking.objects.select_related("status").get(id=booking_id)
     except Booking.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Booking not found.", status.HTTP_404_NOT_FOUND)
 
@@ -116,36 +137,42 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
             "location": booking.location,
             "amount": str(booking.amount) if booking.amount else None,
             "deposit": str(booking.deposit) if booking.deposit else None,
-            "status": booking.status,
+            "status": booking.status.name if booking.status else None,
+            "status_id": booking.status_id,
             "created_at": booking.created_at,
-            "updated_at": booking.updated_at
+            "updated_at": booking.updated_at,
         }
         return ResponseService.response("SUCCESS", payload, "Booking fetched successfully.")
 
     elif request.method == "PATCH":
         new_status = request.data.get("status")
-        if new_status not in ["pending", "confirmed", "completed", "cancelled"]:
+        if new_status not in ALLOWED_BOOKING_STATUS_NAMES:
             return ResponseService.response("BAD_REQUEST", {"detail": "Invalid status."}, "Validation error", status.HTTP_400_BAD_REQUEST)
 
-        booking.status = new_status
+        booking.status = get_booking_status_ref(new_status)
         booking.save(update_fields=["status", "updated_at"])
+        status_name = booking.status.name if booking.status else None
         log_activity(
-            actor=user,
+            actor=request.user,
             category="booking",
             event="status_updated",
             resource_type="booking",
             resource_id=booking.id,
-            payload={"status": booking.status},
+            payload={"status": status_name},
         )
 
-        if booking.status == "completed":
+        if status_name == "completed":
             log_activity(
-                actor=user,
+                actor=request.user,
                 category="payment",
                 event="booking_completed",
                 resource_type="booking",
                 resource_id=booking.id,
                 payload={"amount": str(booking.amount) if booking.amount is not None else None},
             )
-        
-        return ResponseService.response("SUCCESS", {"id": booking.id, "status": booking.status}, "Booking updated successfully.")
+
+        return ResponseService.response(
+            "SUCCESS",
+            {"id": booking.id, "status": status_name, "status_id": booking.status_id},
+            "Booking updated successfully.",
+        )

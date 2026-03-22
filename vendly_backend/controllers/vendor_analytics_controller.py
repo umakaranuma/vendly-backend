@@ -26,9 +26,9 @@ def vendor_analytics_view(request: Request) -> Response:
         bookings_count = Booking.objects.filter(vendor=vendor).count()
         
         revenue = Booking.objects.filter(
-            vendor=vendor, 
-            status="completed"
-        ).aggregate(Sum('amount'))['amount__sum'] or 0.00
+            vendor=vendor,
+            status__name="completed",
+        ).aggregate(Sum("amount"))["amount__sum"] or 0.00
         
         payload = {
             "views": views_count,

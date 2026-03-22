@@ -166,6 +166,67 @@ def _user_payload(user: CoreUser) -> dict:
     }
 
 
+def _account_type_from_role(user: CoreUser) -> str:
+    """Lowercase role name for clients (e.g. customer, vendor)."""
+    if user.role and user.role.name:
+        return user.role.name.strip().lower()
+    return "unknown"
+
+
+def _vendor_business_payload(vendor: Vendor) -> dict:
+    """
+    Business profile from `vendors` + `categories`.
+    Business display name is `vendors.name` (maps to API field `business_name`).
+    """
+    cat = vendor.category
+    category_payload = None
+    if cat:
+        category_payload = {"id": cat.id, "name": cat.name, "slug": cat.slug}
+    return {
+        "id": vendor.id,
+        "business_name": vendor.name,
+        "name": vendor.name,
+        "city": vendor.city,
+        "bio": vendor.bio,
+        "category_id": vendor.category_id,
+        "category": category_payload,
+        "status": vendor.status,
+        "approved_at": vendor.approved_at.isoformat() if vendor.approved_at else None,
+        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+        "review_count": vendor.review_count,
+        "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+    }
+
+
+def _otp_confirmation_payload(user: CoreUser) -> dict:
+    """
+    Post-OTP response: account type, user row, and vendor business row when applicable.
+    Vendor person name: `core_users.first_name` / `last_name`; business: `vendors` row.
+    """
+    base = _user_payload(user)
+    account_type = _account_type_from_role(user)
+    payload: dict = {
+        **base,
+        "account_type": account_type,
+    }
+    role_name = (user.role.name if user.role else "") or ""
+    if role_name.upper() == "VENDOR":
+        payload["vendor_person_name"] = (user.first_name or "").strip()
+        vendor = getattr(user, "vendor", None)
+        if vendor is not None:
+            payload["vendor"] = _vendor_business_payload(vendor)
+        else:
+            payload["vendor"] = None
+    else:
+        payload["vendor"] = None
+        payload["customer"] = {
+            "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or None,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+    return payload
+
+
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
@@ -390,24 +451,21 @@ def register_vendor(request: Request) -> Response:
 @permission_classes([AllowAny])
 def login_view(request: Request) -> Response:
     data = request.data
-    email = (data.get("email") or "").strip() or None
-    phone = (data.get("phone") or "").strip() or None
+    phone = _phone_from_registration_data(data)
     password = data.get("password") or ""
 
-    # Validate login input; password required, at least one of email/phone required
+    validation_payload = _data_with_phone_for_validation(data, phone)
     errors = ValidatorService.validate(
-        data,
+        validation_payload,
         rules={
             "password": "required",
+            "phone": "required",
         },
         custom_messages={
             "password.required": "Password is required.",
+            "phone.required": "Phone is required.",
         },
     )
-
-    if not email and not phone:
-        errors = errors or {}
-        errors.setdefault("contact", []).append("Either email or phone is required.")
 
     if errors:
         return ResponseService.response(
@@ -417,17 +475,10 @@ def login_view(request: Request) -> Response:
         )
 
     user: CoreUser | None = None
-
-    if email:
-        try:
-            user = CoreUser.objects.get(email=email)
-        except CoreUser.DoesNotExist:
-            user = None
-    elif phone:
-        try:
-            user = CoreUser.objects.get(phone=phone)
-        except CoreUser.DoesNotExist:
-            user = None
+    try:
+        user = CoreUser.objects.get(phone=phone)
+    except CoreUser.DoesNotExist:
+        user = None
 
     if not user or not user.check_password(password):
         return ResponseService.response(
@@ -475,7 +526,8 @@ def login_view(request: Request) -> Response:
 @permission_classes([AllowAny])
 def admin_login_view(request: Request) -> Response:
     """
-    JWT login for staff dashboard clients. Same credentials shape as /api/auth/login.
+    JWT login for staff dashboard clients. Password required; send email or phone.
+    Public /api/auth/login uses phone + password only.
     Allowed: CoreRole ADMIN/SUPER_ADMIN, or Django superuser (createsuperuser).
     Does not require OTP verification for accounts outside the customer/vendor registration flow.
     """
@@ -586,7 +638,7 @@ def confirm_registration_otp(request: Request) -> Response:
         )
 
     try:
-        user = CoreUser.objects.get(id=user_id)
+        user = CoreUser.objects.select_related("role", "vendor", "vendor__category").get(id=user_id)
     except CoreUser.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
@@ -626,7 +678,7 @@ def confirm_registration_otp(request: Request) -> Response:
     tokens = _build_tokens_for_user(user)
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": _user_payload(user)},
+        {"tokens": tokens, "user": _otp_confirmation_payload(user)},
         "OTP confirmed. Registration completed successfully.",
         status.HTTP_200_OK,
     )

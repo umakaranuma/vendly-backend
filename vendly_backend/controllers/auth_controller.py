@@ -181,7 +181,7 @@ def register_customer(request: Request) -> Response:
     errors = ValidatorService.validate(
         _data_with_phone_for_validation(data, phone),
         rules={
-            "email": "required|email|unique:core_users,email",
+            "email": "nullable|email|unique:core_users,email",
             "phone": "required|unique:core_users,phone",
             "password": "required|min:6",
             "first_name": "required",
@@ -285,7 +285,7 @@ def register_vendor(request: Request) -> Response:
     errors = ValidatorService.validate(
         _data_with_phone_for_validation(data, phone),
         rules={
-            "email": "required|email|unique:core_users,email",
+            "email": "nullable|email|unique:core_users,email",
             "phone": "required|unique:core_users,phone",
             "password": "required|min:6",
         },

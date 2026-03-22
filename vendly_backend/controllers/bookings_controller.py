@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -6,6 +8,7 @@ from rest_framework import status
 
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
+from mServices.ValidatorService import ValidatorService
 from vendly_backend.activity_log import log_activity
 from vendly_backend.booking_statuses import ALLOWED_BOOKING_STATUS_NAMES, get_booking_status_ref
 from vendly_backend.models import Booking, Vendor
@@ -57,20 +60,43 @@ def bookings_list_view(request: Request) -> Response:
 
     elif request.method == "POST":
         data = request.data
-        vendor_id = data.get("vendor_id")
+        errors = ValidatorService.validate(
+            data,
+            rules={
+                "vendor_id": "required|integer|exists:vendors,id",
+                "event_type": "required|string|max:255",
+                "booking_date": "required|date",
+                "location": "nullable|string|max:255",
+                "amount": "nullable|numeric",
+                "deposit": "nullable|numeric",
+            },
+            custom_messages={
+                "vendor_id.required": "vendor_id is required.",
+                "vendor_id.integer": "vendor_id must be an integer.",
+                "event_type.required": "event_type is required.",
+                "event_type.max": "event_type may not be greater than 255 characters.",
+                "booking_date.required": "booking_date is required.",
+                "booking_date.date": "booking_date must be a valid date (YYYY-MM-DD).",
+            },
+        )
+        if errors:
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                errors,
+                "Validation Error",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        vendor = Vendor.objects.get(id=data.get("vendor_id"))
+        booking_date = datetime.strptime(data.get("booking_date"), "%Y-%m-%d")
         event_type = data.get("event_type")
-        booking_date = data.get("booking_date")
         location = data.get("location")
         amount = data.get("amount")
         deposit = data.get("deposit")
-        
-        if not vendor_id or not event_type or not booking_date:
-            return ResponseService.response("BAD_REQUEST", {"detail": "vendor_id, event_type, and booking_date are required."}, "Validation error", status.HTTP_400_BAD_REQUEST)
-
-        try:
-            vendor = Vendor.objects.get(id=vendor_id)
-        except Vendor.DoesNotExist:
-            return ResponseService.response("NOT_FOUND", {}, "Vendor not found.", status.HTTP_404_NOT_FOUND)
+        if amount in (None, ""):
+            amount = None
+        if deposit in (None, ""):
+            deposit = None
 
         booking = Booking.objects.create(
             customer=user,

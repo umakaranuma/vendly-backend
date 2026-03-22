@@ -7,7 +7,20 @@ from django.db import transaction
 
 import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
-from vendly_backend.models import Post, PostMedia
+from vendly_backend.models import Post, PostMedia, Vendor
+
+
+def _require_vendor(request: Request):
+    """Return (vendor, None) or (None, error Response) if the user has no vendor profile."""
+    try:
+        return request.user.vendor, None
+    except Vendor.DoesNotExist:
+        return None, ResponseService.response(
+            "FORBIDDEN",
+            {"detail": "Only vendor accounts can create or manage feed posts."},
+            "Vendor profile required.",
+            status.HTTP_403_FORBIDDEN,
+        )
 from vendly_backend.supabase_media import (
     MediaValidationError,
     SupabaseNotConfiguredError,
@@ -98,7 +111,9 @@ def _persist_post(vendor, caption: str, media_list: list) -> Response:
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def vendor_posts_view(request: Request) -> Response:
-    vendor = request.user.vendor
+    vendor, err = _require_vendor(request)
+    if err is not None:
+        return err
 
     if request.method == "GET":
         try:
@@ -125,7 +140,9 @@ def vendor_posts_view(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def vendor_post_create_view(request: Request) -> Response:
     """Alias for POST /api/vendor/posts — multipart or JSON body."""
-    vendor = request.user.vendor
+    vendor, err = _require_vendor(request)
+    if err is not None:
+        return err
     if _is_multipart(request):
         return _create_post_from_multipart(request, vendor)
     return _create_post_from_payload(request, vendor)
@@ -134,8 +151,11 @@ def vendor_post_create_view(request: Request) -> Response:
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
 def vendor_post_detail_view(request: Request, post_id: int) -> Response:
+    vendor, err = _require_vendor(request)
+    if err is not None:
+        return err
     try:
-        post = Post.objects.get(id=post_id, vendor=request.user.vendor)
+        post = Post.objects.get(id=post_id, vendor=vendor)
         post.delete()
         return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
     except Post.DoesNotExist:

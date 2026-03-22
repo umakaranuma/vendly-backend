@@ -40,7 +40,9 @@ def _client():
     url = (getattr(settings, "SUPABASE_URL", None) or "").strip()
     key = (getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", None) or "").strip()
     if not url or not key:
-        raise SupabaseNotConfiguredError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set.")
+        raise SupabaseNotConfiguredError(
+            "SUPABASE_URL and a secret key must be set (SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY)."
+        )
     from supabase import create_client
 
     return create_client(url, key)

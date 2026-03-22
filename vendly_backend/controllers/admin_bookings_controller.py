@@ -10,6 +10,7 @@ from rest_framework import status
 
 from mServices.ResponseService import ResponseService
 from vendly_backend.activity_log import log_activity
+from vendly_backend.booking_statuses import ALLOWED_BOOKING_STATUS_NAMES, get_booking_status_ref
 from vendly_backend.models import Booking
 def _paginate(queryset, page: int, limit: int):
     total = queryset.count()
@@ -28,8 +29,7 @@ def admin_bookings_list_view(request: Request) -> Response:
     limit = int(request.GET.get("limit", 20))
     booking_status = request.GET.get("status", "").strip()
 
-    allowed_statuses = {"pending", "confirmed", "completed", "cancelled"}
-    if booking_status and booking_status not in allowed_statuses:
+    if booking_status and booking_status not in ALLOWED_BOOKING_STATUS_NAMES:
         return ResponseService.response(
             "BAD_REQUEST",
             {"detail": "Invalid status."},
@@ -37,9 +37,9 @@ def admin_bookings_list_view(request: Request) -> Response:
             status.HTTP_400_BAD_REQUEST,
         )
 
-    qs = Booking.objects.select_related("customer", "vendor").order_by("-created_at")
+    qs = Booking.objects.select_related("customer", "vendor", "status").order_by("-created_at")
     if booking_status:
-        qs = qs.filter(status=booking_status)
+        qs = qs.filter(status__name=booking_status)
 
     items, total, next_page = _paginate(qs, page, limit)
 
@@ -58,7 +58,8 @@ def admin_bookings_list_view(request: Request) -> Response:
                 "location": b.location,
                 "amount": str(b.amount) if b.amount is not None else None,
                 "deposit": str(b.deposit) if b.deposit is not None else None,
-                "status": b.status,
+                "status": b.status.name if b.status else None,
+                "status_id": b.status_id,
                 "created_at": b.created_at,
                 "updated_at": b.updated_at,
             }
@@ -76,8 +77,7 @@ def admin_bookings_list_view(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def admin_booking_update_view(request: Request, booking_id: int) -> Response:
     new_status = request.data.get("status")
-    allowed_statuses = {"pending", "confirmed", "completed", "cancelled"}
-    if new_status not in allowed_statuses:
+    if new_status not in ALLOWED_BOOKING_STATUS_NAMES:
         return ResponseService.response(
             "BAD_REQUEST",
             {"detail": "Invalid status."},
@@ -86,7 +86,7 @@ def admin_booking_update_view(request: Request, booking_id: int) -> Response:
         )
 
     try:
-        booking = Booking.objects.get(id=booking_id)
+        booking = Booking.objects.select_related("status").get(id=booking_id)
     except Booking.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
@@ -95,20 +95,21 @@ def admin_booking_update_view(request: Request, booking_id: int) -> Response:
             status.HTTP_404_NOT_FOUND,
         )
 
-    booking.status = new_status
+    booking.status = get_booking_status_ref(new_status)
     booking.save(update_fields=["status", "updated_at"])
+    status_name = booking.status.name if booking.status else None
     log_activity(
         actor=request.user,
         category="booking",
         event="admin_status_updated",
         resource_type="booking",
         resource_id=booking.id,
-        payload={"status": booking.status},
+        payload={"status": status_name},
     )
 
     return ResponseService.response(
         "SUCCESS",
-        {"id": booking.id, "status": booking.status},
+        {"id": booking.id, "status": status_name, "status_id": booking.status_id},
         "Booking updated successfully.",
         status.HTTP_200_OK,
     )

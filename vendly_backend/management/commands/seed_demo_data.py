@@ -20,6 +20,8 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
+from vendly_backend.booking_statuses import get_booking_status_ref
+from vendly_backend.vendor_ratings import sync_vendor_rating_from_reviews
 from vendly_backend.models import (
     Booking,
     Category,
@@ -375,7 +377,7 @@ class Command(BaseCommand):
                     location=v0.city,
                     amount=Decimal("5200.00"),
                     deposit=Decimal("1000.00"),
-                    status="completed",
+                    status=get_booking_status_ref("completed"),
                 )
             if not VendorReview.objects.filter(booking=booking).exists():
                 VendorReview.objects.create(
@@ -385,5 +387,6 @@ class Command(BaseCommand):
                     rating=Decimal("5.00"),
                     comment="Flawless execution and great communication.",
                 )
+            sync_vendor_rating_from_reviews(v0.id)
 
         self.stdout.write(self.style.SUCCESS("Demo seed finished."))

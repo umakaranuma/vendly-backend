@@ -34,7 +34,7 @@ def admin_dashboard_summary_view(request: Request) -> Response:
 
     earnings_last_month = (
         Booking.objects.filter(
-            status="completed",
+            status__name="completed",
             booking_date__gte=last_month_start,
             booking_date__lt=last_month_end,
         ).aggregate(total=Sum("amount"))["total"]

@@ -1,3 +1,5 @@
+import json
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.request import Request
@@ -7,6 +9,10 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import VendorPackage, Vendor
+from vendly_backend.validators.vendor_package_validators import (
+    normalize_features_json_for_storage,
+    validate_vendor_package_create,
+)
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def vendor_public_packages_view(request: Request, vendor_id: int) -> Response:
@@ -19,10 +25,14 @@ def vendor_public_packages_view(request: Request, vendor_id: int) -> Response:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 20))
         
+        filters = {
+            "vendor_id": {"o": "=", "v": vendor.id},
+            "is_active": {"o": "=", "v": True},
+        }
         query = (
             QueryBuilderService("vendor_packages")
             .select("vendor_packages.id", "vendor_packages.name", "vendor_packages.price", "vendor_packages.features_text", "vendor_packages.features_json", "vendor_packages.is_active")
-            .apply_conditions(f'{{"vendor_id": {vendor.id}, "is_active": true}}', ["vendor_id", "is_active"], "", [])
+            .apply_conditions(json.dumps(filters), ["vendor_id", "is_active"], "", [])
             .paginate(page, limit, ["vendor_packages.created_at"], "vendor_packages.created_at", "asc")
         )
         return ResponseService.response("SUCCESS", query, "Vendor packages retrieved successfully.")
@@ -39,10 +49,11 @@ def vendor_packages_view(request: Request) -> Response:
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 20))
             
+            filters = {"vendor_id": {"o": "=", "v": vendor.id}}
             query = (
                 QueryBuilderService("vendor_packages")
                 .select("vendor_packages.id", "vendor_packages.name", "vendor_packages.price", "vendor_packages.features_text", "vendor_packages.features_json", "vendor_packages.is_active")
-                .apply_conditions(f'{{"vendor_id": {vendor.id}}}', ["vendor_id"], "", [])
+                .apply_conditions(json.dumps(filters), ["vendor_id"], "", [])
                 .paginate(page, limit, ["vendor_packages.created_at"], "vendor_packages.created_at", "desc")
             )
             return ResponseService.response("SUCCESS", query, "Packages retrieved successfully.")
@@ -51,15 +62,22 @@ def vendor_packages_view(request: Request) -> Response:
 
     elif request.method == "POST":
         data = request.data
+        errors = validate_vendor_package_create(data)
+        if errors:
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                errors,
+                "Validation Error",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
         name = data.get("name")
         price = data.get("price")
         features_text = data.get("features_text", "")
-        features_json = data.get("features_json")
-        is_active = data.get("is_active", True)
-        
-        if not name or price is None:
-            return ResponseService.response("BAD_REQUEST", {"detail": "Name and price are required."}, "Validation error", status.HTTP_400_BAD_REQUEST)
-            
+        features_json = normalize_features_json_for_storage(data.get("features_json"))
+        raw_active = data.get("is_active", True)
+        is_active = True if raw_active is None else raw_active
+
         # Business Rule: Check max_packages limit
         # active_subscriptions = vendor.subscriptions.filter(is_active=True).select_related('plan').first()
         # max_allowed = active_subscriptions.plan.max_packages if active_subscriptions else 2

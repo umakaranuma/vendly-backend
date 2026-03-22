@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from django.core.paginator import Paginator
+from django.db.models import Q
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -7,11 +9,58 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from mServices.ResponseService import ResponseService
-from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 from vendly_backend.activity_log import log_activity
-from vendly_backend.booking_statuses import ALLOWED_BOOKING_STATUS_NAMES, get_booking_status_ref
+from vendly_backend.booking_statuses import (
+    ALLOWED_BOOKING_STATUS_NAMES,
+    ALLOWED_BOOKING_STATUS_TYPES,
+    get_booking_status_ref,
+)
 from vendly_backend.models import Booking, Vendor, VendorPackage
+
+
+def _vendor_for_user(user):
+    try:
+        return user.vendor
+    except Vendor.DoesNotExist:
+        return None
+
+
+def _user_can_access_booking(user, booking: Booking) -> bool:
+    if booking.customer_id == user.id or booking.requested_by_id == user.id:
+        return True
+    return booking.vendor.user_id == user.id
+
+
+def _vendor_booking_side(user, vendor_profile: Vendor | None, booking: Booking):
+    """For vendor accounts: incoming vs outgoing request; null for customer-only list."""
+    if vendor_profile is None:
+        return None
+    if booking.requested_by_id == user.id:
+        return "requested"
+    if booking.vendor_id == vendor_profile.id:
+        return "received"
+    return None
+
+
+def _serialize_booking_list_row(booking: Booking, user, vendor_profile):
+    bd = booking.booking_date
+    bd_out = bd.isoformat() if hasattr(bd, "isoformat") else bd
+    return {
+        "id": booking.id,
+        "event_type": booking.event_type,
+        "booking_date": bd_out,
+        "location": booking.location,
+        "amount": str(booking.amount) if booking.amount is not None else None,
+        "status": booking.status.name if booking.status else None,
+        "status_type": booking.status.status_type if booking.status else None,
+        "first_name": booking.customer.first_name,
+        "last_name": booking.customer.last_name,
+        "vendor_name": booking.vendor.name,
+        "requested_by_id": booking.requested_by_id,
+        "vendor_booking_side": _vendor_booking_side(user, vendor_profile, booking),
+    }
+
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
@@ -22,11 +71,27 @@ def bookings_list_view(request: Request) -> Response:
         try:
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 20))
-            booking_status = request.GET.get("status", "")
-            
-            query = QueryBuilderService("bookings")
+            raw_status_type = (request.GET.get("status_type") or "").strip()
+            booking_status = (request.GET.get("status") or "").strip()
+            if page < 1 or limit < 1:
+                raise ValueError("Invalid pagination")
 
-            if booking_status:
+            vendor_profile = _vendor_for_user(user)
+            if vendor_profile is not None:
+                qs = Booking.objects.filter(Q(vendor_id=vendor_profile.id) | Q(requested_by=user))
+            else:
+                qs = Booking.objects.filter(customer=user)
+
+            if raw_status_type:
+                if raw_status_type not in ALLOWED_BOOKING_STATUS_TYPES:
+                    return ResponseService.response(
+                        "BAD_REQUEST",
+                        {"status_type": ["Invalid status_type filter."]},
+                        "Validation error",
+                        status.HTTP_400_BAD_REQUEST,
+                    )
+                qs = qs.filter(status__status_type=raw_status_type)
+            elif booking_status:
                 if booking_status not in ALLOWED_BOOKING_STATUS_NAMES:
                     return ResponseService.response(
                         "BAD_REQUEST",
@@ -35,26 +100,29 @@ def bookings_list_view(request: Request) -> Response:
                         status.HTTP_400_BAD_REQUEST,
                     )
                 sid = get_booking_status_ref(booking_status).id
-                query = query.apply_conditions(f'{{"status_id": {sid}}}', ["status_id"], "", [])
+                qs = qs.filter(status_id=sid)
 
-            query = (
-                query.select(
-                    "bookings.id",
-                    "bookings.event_type",
-                    "bookings.booking_date",
-                    "bookings.location",
-                    "bookings.amount",
-                    "core_statuses.name as status",
-                    "core_users.first_name",
-                    "core_users.last_name",
-                    "vendors.name as vendor_name",
-                )
-                .leftJoin("core_users", "core_users.id", "bookings.customer_id")
-                .leftJoin("vendors", "vendors.id", "bookings.vendor_id")
-                .leftJoin("core_statuses", "core_statuses.id", "bookings.status_id")
-                .paginate(page, limit, ["bookings.created_at"], "bookings.created_at", "desc")
+            qs = qs.select_related("status", "vendor", "customer", "requested_by").order_by("-created_at")
+            paginator = Paginator(qs, limit)
+            page_obj = paginator.get_page(page)
+            data = [
+                _serialize_booking_list_row(b, user, vendor_profile) for b in page_obj.object_list
+            ]
+            result = {
+                "total_records": paginator.count,
+                "per_page": limit,
+                "current_page": page_obj.number,
+                "last_page": paginator.num_pages or 1,
+                "data": data,
+            }
+            return ResponseService.response("SUCCESS", result, "Bookings retrieved successfully.")
+        except ValueError:
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                {"pagination": ["Invalid parameters"]},
+                "Invalid Request",
+                status.HTTP_400_BAD_REQUEST,
             )
-            return ResponseService.response("SUCCESS", query, "Bookings retrieved successfully.")
         except Exception as e:
             return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
@@ -124,6 +192,7 @@ def bookings_list_view(request: Request) -> Response:
 
         booking = Booking.objects.create(
             customer=user,
+            requested_by=user,
             vendor=vendor,
             vendor_package=vendor_package,
             event_type=event_type,
@@ -164,12 +233,14 @@ def bookings_list_view(request: Request) -> Response:
         payload = {
             "id": booking.id,
             "status": booking.status.name if booking.status else None,
+            "status_type": booking.status.status_type if booking.status else None,
             "status_id": booking.status_id,
             "event_type": booking.event_type,
             "booking_date": booking.booking_date,
             "vendor_id": booking.vendor.id,
             "package_id": booking.vendor_package_id,
             "amount": str(booking.amount) if booking.amount is not None else None,
+            "requested_by_id": booking.requested_by_id,
         }
         return ResponseService.response("SUCCESS", payload, "Booking created successfully.", status.HTTP_201_CREATED)
 
@@ -177,9 +248,19 @@ def bookings_list_view(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def booking_detail_view(request: Request, booking_id: int) -> Response:
     try:
-        booking = Booking.objects.select_related("status").get(id=booking_id)
+        booking = Booking.objects.select_related("status", "vendor", "customer", "requested_by").get(id=booking_id)
     except Booking.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Booking not found.", status.HTTP_404_NOT_FOUND)
+
+    if not _user_can_access_booking(request.user, booking):
+        return ResponseService.response(
+            "FORBIDDEN",
+            {"detail": "You do not have access to this booking."},
+            "Forbidden",
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    vendor_profile = _vendor_for_user(request.user)
 
     if request.method == "GET":
         payload = {
@@ -193,7 +274,10 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
             "amount": str(booking.amount) if booking.amount else None,
             "deposit": str(booking.deposit) if booking.deposit else None,
             "status": booking.status.name if booking.status else None,
+            "status_type": booking.status.status_type if booking.status else None,
             "status_id": booking.status_id,
+            "requested_by_id": booking.requested_by_id,
+            "vendor_booking_side": _vendor_booking_side(request.user, vendor_profile, booking),
             "created_at": booking.created_at,
             "updated_at": booking.updated_at,
         }

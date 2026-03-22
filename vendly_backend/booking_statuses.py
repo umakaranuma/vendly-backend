@@ -14,6 +14,9 @@ BOOKING_STATUS_TYPE_BY_NAME: dict[str, str] = {
 
 ALLOWED_BOOKING_STATUS_NAMES = frozenset(BOOKING_STATUS_TYPE_BY_NAME.keys())
 
+# CoreStatus.status_type values for bookings (e.g. booking_pending).
+ALLOWED_BOOKING_STATUS_TYPES = frozenset(BOOKING_STATUS_TYPE_BY_NAME.values())
+
 
 @lru_cache(maxsize=8)
 def get_booking_status_ref(name: str):

@@ -371,6 +371,7 @@ class Command(BaseCommand):
             if not booking:
                 booking = Booking.objects.create(
                     customer=customer_a,
+                    requested_by=customer_a,
                     vendor=v0,
                     event_type="Wedding reception",
                     booking_date=now - timedelta(days=14),

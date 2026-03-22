@@ -78,9 +78,12 @@ from vendly_backend.controllers.categories_controller import categories_list_vie
 from vendly_backend.controllers.favorites_controller import favorites_list_view, favorite_vendor_view
 from vendly_backend.controllers.vendor_listings_controller import vendor_listings_view, vendor_listing_detail_view
 from vendly_backend.controllers.vendor_posts_controller import (
+    posts_collection_view,
+    posts_detail_view,
     vendor_post_create_view,
     vendor_posts_view,
     vendor_post_detail_view,
+    vendor_posts_by_vendor_id_view,
 )
 from vendly_backend.controllers.vendor_packages_controller import vendor_packages_view, vendor_package_detail_view, vendor_public_packages_view
 from vendly_backend.controllers.vendor_subscriptions_controller import vendor_subscription_view, subscription_plans_view
@@ -138,6 +141,7 @@ urlpatterns = [
 
     # Reviews
     path("api/vendors/<int:vendor_id>/reviews", vendor_reviews_view),
+    path("api/vendors/<int:vendor_id>/posts", vendor_posts_by_vendor_id_view),
 
     # Messaging
     path("api/conversations", conversations_view),
@@ -159,6 +163,8 @@ urlpatterns = [
     # Vendor - Posts (self); JSON or multipart (caption + media_file[s])
     path("api/vendor/posts", vendor_posts_view),
     path("api/posts/create", vendor_post_create_view),
+    path("api/posts", posts_collection_view),
+    path("api/posts/<int:post_id>", posts_detail_view),
     path("api/vendor/posts/<int:post_id>", vendor_post_detail_view),
 
     # Vendor - Packages & Subs (Public + Self)

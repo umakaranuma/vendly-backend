@@ -13,7 +13,9 @@ from rest_framework.response import Response
 import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
+from vendly_backend.controllers.feed_controller import list_posts_impl, retrieve_feed_post_impl
 from vendly_backend.models import Post, PostMedia, Vendor
+from vendly_backend.permissions import is_admin_user
 from vendly_backend.supabase_media import (
     MediaValidationError,
     SupabaseBucketNotFoundError,
@@ -36,7 +38,14 @@ def _require_vendor(request: Request):
 
 
 def _is_multipart(request: Request) -> bool:
+    """
+    True when the client intends a multipart upload (caption + files).
+    Explicit JSON is never treated as multipart so we do not hit Supabase upload
+    for application/json bodies (same behavior as dedicated create routes).
+    """
     ct = (request.content_type or "").lower()
+    if "application/json" in ct:
+        return False
     if "multipart/form-data" in ct:
         return True
     # Clients sometimes omit or mis-set Content-Type; Django still populates FILES.
@@ -105,6 +114,127 @@ def list_vendor_posts(request: Request, vendor) -> Response:
             "VALIDATION_ERROR",
             {"pagination": ["Invalid parameters"]},
             "Invalid Request",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
+
+
+def retrieve_post(request: Request, post_id: int) -> Response:
+    return retrieve_feed_post_impl(request, post_id)
+
+
+def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
+    try:
+        post = Post.objects.get(id=post_id, vendor=vendor)
+        if _is_multipart(request):
+            caption = request.POST.get("caption")
+            if caption is not None:
+                post.caption = (caption or "").strip()
+            files = []
+            files.extend(request.FILES.getlist("media_file"))
+            if not files:
+                files.extend(request.FILES.getlist("media_files"))
+            if not files:
+                files.extend(request.FILES.getlist("media"))
+            if not files:
+                single = request.FILES.get("media_file") or request.FILES.get("media")
+                if single:
+                    files.append(single)
+            if files:
+                post.media.all().delete()
+                owner_key = str(vendor.id)
+                media_list = []
+                for f in files:
+                    try:
+                        url, is_video = upload_django_file("posts", owner_key, f)
+                    except SupabaseNotConfiguredError:
+                        return ResponseService.response(
+                            "INTERNAL_SERVER_ERROR",
+                            {"detail": "Storage is not configured."},
+                            "Storage is not configured.",
+                            status.HTTP_503_SERVICE_UNAVAILABLE,
+                        )
+                    except SupabaseBucketNotFoundError as e:
+                        return ResponseService.response(
+                            "INTERNAL_SERVER_ERROR",
+                            {"detail": str(e)},
+                            "Storage bucket not found.",
+                            status.HTTP_503_SERVICE_UNAVAILABLE,
+                        )
+                    except MediaValidationError as e:
+                        return ResponseService.response(
+                            "VALIDATION_ERROR",
+                            {"media_file": [str(e)]},
+                            "Validation error",
+                            status.HTTP_400_BAD_REQUEST,
+                        )
+                    except Exception as e:
+                        return ResponseService.response(
+                            "INTERNAL_SERVER_ERROR",
+                            {"detail": str(e)},
+                            "Upload failed.",
+                            status.HTTP_502_BAD_GATEWAY,
+                        )
+                    media_list.append({"url": url, "is_video": is_video})
+                for i, media_item in enumerate(media_list):
+                    PostMedia.objects.create(
+                        post=post,
+                        url=media_item["url"],
+                        is_video=media_item.get("is_video", False),
+                        sort_order=i,
+                    )
+            post.save()
+        else:
+            data = request.data
+            errors = ValidatorService.validate(
+                data,
+                rules={"caption": "nullable|string"},
+                custom_messages={},
+            )
+            if errors:
+                return ResponseService.response(
+                    "VALIDATION_ERROR",
+                    errors,
+                    "Validation Error",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if "caption" in data:
+                post.caption = (data.get("caption") or "") or ""
+            if "media" in data:
+                media_list, media_err = _validate_media_payload(data.get("media"))
+                if media_err is not None:
+                    return media_err
+                post.media.all().delete()
+                for i, media_item in enumerate(media_list or []):
+                    if isinstance(media_item, dict) and "url" in media_item:
+                        PostMedia.objects.create(
+                            post=post,
+                            url=media_item["url"],
+                            is_video=media_item.get("is_video", False),
+                            sort_order=i,
+                        )
+            post.save()
+
+        post.refresh_from_db()
+        media_qs = post.media.order_by("sort_order")
+        payload = {
+            "id": post.id,
+            "caption": post.caption,
+            "created_at": post.created_at,
+            "media": [
+                {"url": m.url, "is_video": m.is_video, "sort_order": m.sort_order}
+                for m in media_qs
+            ],
+        }
+        return ResponseService.response("SUCCESS", payload, "Post updated successfully.")
+    except Post.DoesNotExist:
+        return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+    except ValidationError as e:
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            getattr(e, "message_dict", None) or {"detail": [str(e)]},
+            "Validation Error",
             status.HTTP_400_BAD_REQUEST,
         )
     except Exception as e:
@@ -266,6 +396,14 @@ def _persist_post(vendor, caption: str, media_list: list) -> Response:
     return ResponseService.response("SUCCESS", payload, "Post created successfully.", status.HTTP_201_CREATED)
 
 
+def run_vendor_post_create(request: Request) -> Response:
+    """Shared by POST /api/posts/create, POST /api/vendor/posts, and POST /api/posts."""
+    vendor, err = _require_vendor(request)
+    if err is not None:
+        return err
+    return create_vendor_post(request, vendor)
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def vendor_posts_view(request: Request) -> Response:
@@ -281,10 +419,7 @@ def vendor_posts_view(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def vendor_post_create_view(request: Request) -> Response:
     """Alias for POST /api/vendor/posts — multipart or JSON body."""
-    vendor, err = _require_vendor(request)
-    if err is not None:
-        return err
-    return create_vendor_post(request, vendor)
+    return run_vendor_post_create(request)
 
 
 @api_view(["DELETE"])
@@ -299,3 +434,51 @@ def vendor_post_detail_view(request: Request, post_id: int) -> Response:
         return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
     except Post.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def posts_collection_view(request: Request) -> Response:
+    if request.method == "GET":
+        # Same payload as /api/feed/posts (call impl directly — nested @api_view needs HttpRequest)
+        return list_posts_impl(request)
+    return run_vendor_post_create(request)
+
+
+@api_view(["GET", "PUT", "DELETE"])
+@permission_classes([IsAuthenticated])
+def posts_detail_view(request: Request, post_id: int) -> Response:
+    if request.method == "GET":
+        return retrieve_post(request, post_id)
+    if request.method == "PUT":
+        vendor, err = _require_vendor(request)
+        if err is not None:
+            return err
+        return update_vendor_post(request, vendor, post_id)
+    if is_admin_user(request.user):
+        try:
+            post = Post.objects.get(id=post_id)
+        except Post.DoesNotExist:
+            return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+        post.delete()
+        return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
+    vendor, err = _require_vendor(request)
+    if err is not None:
+        return err
+    try:
+        post = Post.objects.get(id=post_id, vendor=vendor)
+        post.delete()
+        return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
+    except Post.DoesNotExist:
+        return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def vendor_posts_by_vendor_id_view(request: Request, vendor_id: int) -> Response:
+    try:
+        Vendor.objects.get(pk=vendor_id)
+    except Vendor.DoesNotExist:
+        return ResponseService.response("NOT_FOUND", {}, "Vendor not found.", status.HTTP_404_NOT_FOUND)
+    # Same rich payload as GET /api/posts and GET /api/feed/posts (media, vendor, is_liked_by_me, …)
+    return list_posts_impl(request, vendor_id=vendor_id)

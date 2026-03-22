@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 OTP_CACHE_PREFIX = "auth:otp"
+# Registration OTP is fixed (SMS disabled). Must match what clients send to confirm-otp.
+STATIC_REGISTRATION_OTP = "111111"
 
 
 def _build_tokens_for_user(user: CoreUser) -> dict:
@@ -133,7 +135,7 @@ def _send_twilio_sms(phone: str, otp_code: str) -> None:
 
 
 def _send_registration_otp(user: CoreUser) -> None:
-    otp_code = _generate_otp()
+    otp_code = STATIC_REGISTRATION_OTP
     expires_in = int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600))
     expires_at = timezone.now() + timedelta(seconds=expires_in)
 
@@ -145,8 +147,6 @@ def _send_registration_otp(user: CoreUser) -> None:
         },
         timeout=expires_in,
     )
-
-    _send_twilio_sms(user.phone or "", otp_code)
 
 
 def _user_payload(user: CoreUser) -> dict:
@@ -236,10 +236,10 @@ def register_customer(request: Request) -> Response:
             user.save(update_fields=["status_ref"])
             _send_registration_otp(user)
     except Exception as exc:
-        logger.exception("Failed sending registration OTP for customer: %s", exc)
+        logger.exception("Failed preparing registration OTP for customer: %s", exc)
         return ResponseService.response(
             "SERVER_ERROR",
-            {"detail": "Unable to send OTP right now. Please try again."},
+            {"detail": "Registration could not be completed. Please try again."},
             "Registration failed.",
             status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -257,10 +257,10 @@ def register_customer(request: Request) -> Response:
         "SUCCESS",
         {
             "user": _user_payload(user),
-            "otp_sent": True,
+            "otp_sent": False,
             "otp_expires_in_seconds": int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600)),
         },
-        "Customer registered successfully. Please confirm OTP.",
+        "Customer registered successfully. Confirm with static OTP 111111.",
         status.HTTP_201_CREATED,
     )
 
@@ -356,10 +356,10 @@ def register_vendor(request: Request) -> Response:
             )
             _send_registration_otp(user)
     except Exception as exc:
-        logger.exception("Failed sending registration OTP for vendor: %s", exc)
+        logger.exception("Failed preparing registration OTP for vendor: %s", exc)
         return ResponseService.response(
             "SERVER_ERROR",
-            {"detail": "Unable to send OTP right now. Please try again."},
+            {"detail": "Registration could not be completed. Please try again."},
             "Registration failed.",
             status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -377,10 +377,10 @@ def register_vendor(request: Request) -> Response:
         "SUCCESS",
         {
             "user": _user_payload(user),
-            "otp_sent": True,
+            "otp_sent": False,
             "otp_expires_in_seconds": int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600)),
         },
-        "Vendor registered successfully. Please confirm OTP.",
+        "Vendor registered successfully. Confirm with static OTP 111111.",
         status.HTTP_201_CREATED,
     )
 

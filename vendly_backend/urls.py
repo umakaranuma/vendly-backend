@@ -99,7 +99,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # Auth
     path("api/admin/login", admin_login_view, name="admin_login"),
-    # Both register views create the user then call _send_registration_otp (SMS to phone/mobile).
+    # Both register views create the user then call _send_registration_otp (static OTP in cache; no SMS).
     path("api/auth/register/customer", register_customer, name="register_customer"),
     path("api/auth/register/vendor", register_vendor, name="register_vendor"),
     path("api/auth/confirm-otp", confirm_registration_otp, name="confirm_registration_otp"),

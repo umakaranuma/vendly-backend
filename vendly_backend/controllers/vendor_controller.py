@@ -4,6 +4,7 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db.models import Avg, Count
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -16,6 +17,7 @@ from mServices.ValidatorService import ValidatorService
 
 from vendly_backend.models import Vendor
 from vendly_backend.permissions import is_admin_user
+from vendly_backend.vendor_ratings import public_vendor_rating_and_count
 
 
 def _require_vendor(request: Request) -> tuple[Vendor | None, Response | None]:
@@ -217,6 +219,7 @@ def _public_vendor_payload(vendor: Vendor) -> dict:
     """Vendor row plus linked user profile (avatar, cover, names) for public API responses."""
     u = vendor.user
     cat = vendor.category
+    rating, review_count = public_vendor_rating_and_count(vendor)
     return {
         "id": vendor.id,
         "name": vendor.name,
@@ -228,8 +231,8 @@ def _public_vendor_payload(vendor: Vendor) -> dict:
             if cat
             else None
         ),
-        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
-        "review_count": vendor.review_count,
+        "rating": rating,
+        "review_count": review_count,
         "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
         "bio": vendor.bio,
         "status": _public_vendor_status_display(vendor),
@@ -256,6 +259,10 @@ def list_public_vendors(request: Request) -> Response:
         qs = (
             Vendor.objects.filter(status="approved")
             .select_related("user", "category", "status_ref")
+            .annotate(
+                _reviews_count=Count("reviews"),
+                _reviews_avg=Avg("reviews__rating"),
+            )
             .order_by("-created_at")
         )
         paginator = Paginator(qs, limit)
@@ -291,6 +298,10 @@ def retrieve_public_vendor(request: Request, vendor_id: int) -> Response:
         vendor = (
             Vendor.objects.filter(status="approved", pk=vendor_id)
             .select_related("user", "category", "status_ref")
+            .annotate(
+                _reviews_count=Count("reviews"),
+                _reviews_avg=Avg("reviews__rating"),
+            )
             .first()
         )
         if vendor is None:

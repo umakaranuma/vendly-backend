@@ -21,6 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from vendly_backend.booking_statuses import get_booking_status_ref
+from vendly_backend.vendor_ratings import sync_vendor_rating_from_reviews
 from vendly_backend.models import (
     Booking,
     Category,
@@ -386,5 +387,6 @@ class Command(BaseCommand):
                     rating=Decimal("5.00"),
                     comment="Flawless execution and great communication.",
                 )
+            sync_vendor_rating_from_reviews(v0.id)
 
         self.stdout.write(self.style.SUCCESS("Demo seed finished."))

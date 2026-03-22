@@ -8,6 +8,7 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from vendly_backend.models import VendorReview, Vendor, Booking
 from vendly_backend.permissions import is_admin_user
+from vendly_backend.vendor_ratings import sync_vendor_rating_from_reviews
 
 
 def _can_submit_vendor_review(user) -> bool:
@@ -138,7 +139,8 @@ def vendor_reviews_view(request: Request, vendor_id: int) -> Response:
             rating=rating,
             comment=comment
         )
-        
+        sync_vendor_rating_from_reviews(vendor.id)
+
         payload = {
             "id": review.id,
             "rating": review.rating,

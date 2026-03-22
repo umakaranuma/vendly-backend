@@ -5,9 +5,10 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import BooleanField, Exists, OuterRef, Prefetch, Value
+from django.db.models import Avg, BooleanField, Count, Exists, OuterRef, Prefetch, Value
 
 from mServices.ResponseService import ResponseService
+from vendly_backend.vendor_ratings import feed_post_vendor_rating_and_count
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import Post, PostLike, PostMedia, Comment, CommentLike
 
@@ -16,6 +17,7 @@ def _serialize_feed_post(post: Post) -> dict:
     vendor = post.vendor
     vu = vendor.user
     cat = vendor.category
+    rating, review_count = feed_post_vendor_rating_and_count(post)
     media_qs = post.media.all()
     media_list = [
         {
@@ -47,8 +49,8 @@ def _serialize_feed_post(post: Post) -> dict:
             "slug": vendor.slug,
             "city": vendor.city,
             "bio": vendor.bio,
-            "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
-            "review_count": vendor.review_count,
+            "rating": rating,
+            "review_count": review_count,
             "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
             "status": vendor.status,
             "category_id": vendor.category_id,
@@ -86,6 +88,10 @@ def list_posts_impl(request: Request, vendor_id: int | None = None) -> Response:
                     "media",
                     queryset=PostMedia.objects.order_by("sort_order", "id"),
                 )
+            )
+            .annotate(
+                _vendor_reviews_count=Count("vendor__reviews"),
+                _vendor_reviews_avg=Avg("vendor__reviews__rating"),
             )
             .order_by("-created_at")
         )
@@ -129,6 +135,10 @@ def retrieve_feed_post_impl(request: Request, post_id: int) -> Response:
                         "media",
                         queryset=PostMedia.objects.order_by("sort_order", "id"),
                     )
+                )
+                .annotate(
+                    _vendor_reviews_count=Count("vendor__reviews"),
+                    _vendor_reviews_avg=Avg("vendor__reviews__rating"),
                 )
             )
             if user.is_authenticated:

@@ -140,9 +140,9 @@ Most registration and API flows use **`vendors`** plus **`core_users`**. Treat *
 
 **Business name** is stored as **`vendors.name`** (not a separate `business_name` column). Person name uses **`core_users.first_name`** / **`last_name`**.
 
-### OTP confirm response (`POST` confirm registration OTP)
+### Auth session user shape (OTP confirm + `/api/auth/login`)
 
-After successful OTP, the API returns `user` with:
+After successful OTP confirmation or **login**, the API returns the same `user` object with:
 
 - **`account_type`** — e.g. `customer`, `vendor` (from `core_roles.name`).
 - **Always:** core user fields (`id`, `email`, `phone`, `first_name`, `last_name`, `is_verified`, `role`, …).

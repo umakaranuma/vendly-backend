@@ -198,9 +198,9 @@ def _vendor_business_payload(vendor: Vendor) -> dict:
     }
 
 
-def _otp_confirmation_payload(user: CoreUser) -> dict:
+def _auth_session_user_payload(user: CoreUser) -> dict:
     """
-    Post-OTP response: account type, user row, and vendor business row when applicable.
+    User object for OTP confirmation and login: base fields, account_type, vendor/customer blocks.
     Vendor person name: `core_users.first_name` / `last_name`; business: `vendors` row.
     """
     base = _user_payload(user)
@@ -476,7 +476,7 @@ def login_view(request: Request) -> Response:
 
     user: CoreUser | None = None
     try:
-        user = CoreUser.objects.get(phone=phone)
+        user = CoreUser.objects.select_related("role", "vendor", "vendor__category").get(phone=phone)
     except CoreUser.DoesNotExist:
         user = None
 
@@ -515,7 +515,7 @@ def login_view(request: Request) -> Response:
 
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": _user_payload(user)},
+        {"tokens": tokens, "user": _auth_session_user_payload(user)},
         "Login successful.",
         status.HTTP_200_OK,
     )
@@ -678,7 +678,7 @@ def confirm_registration_otp(request: Request) -> Response:
     tokens = _build_tokens_for_user(user)
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": _otp_confirmation_payload(user)},
+        {"tokens": tokens, "user": _auth_session_user_payload(user)},
         "OTP confirmed. Registration completed successfully.",
         status.HTTP_200_OK,
     )

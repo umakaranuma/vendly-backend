@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
+import time
 import random
 import re
 from datetime import timedelta
@@ -24,11 +24,8 @@ from vendly_backend.activity_log import log_activity
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
 from vendly_backend.permissions import is_admin_user
 
-try:
-    from pingram import Pingram
-except Exception:  # pragma: no cover - optional dependency at runtime
-    Pingram = None
-
+from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +71,7 @@ def _generate_otp() -> str:
 
 def _normalize_phone_for_sms(phone: str) -> str:
     """
-    Pingram SMS delivery expects a proper mobile destination. Prefer E.164 (e.g. +919876543210).
-    Do not pass the phone as Pingram `to.id` — that field is a user id and can resolve the wrong recipient.
+    Twilio SMS expects E.164 (e.g. +94769114278, +919876543210).
     """
     raw = (phone or "").strip()
     if not raw:
@@ -93,62 +89,47 @@ def _normalize_phone_for_sms(phone: str) -> str:
     return f"+{digits_only}"
 
 
-async def _send_pingram_sms(phone: str, otp_code: str) -> None:
-    if not settings.PINGRAM_API_KEY:
-        raise RuntimeError("PINGRAM_API_KEY is not configured.")
-    if Pingram is None:
-        raise RuntimeError("pingram-python package is not installed.")
+def _send_twilio_sms(phone: str, otp_code: str) -> None:
+    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        raise RuntimeError("TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN are not configured.")
+    if not settings.TWILIO_PHONE_NUMBER:
+        raise RuntimeError("TWILIO_PHONE_NUMBER is not configured.")
 
     to_number = _normalize_phone_for_sms(phone)
     if not to_number:
         raise RuntimeError("Phone number is missing; cannot send OTP SMS.")
 
-    async with Pingram(
-        api_key=settings.PINGRAM_API_KEY,
-        base_url=settings.PINGRAM_BASE_URL,
-    ) as client:
-        payload = {
-            # Only `number` for ad-hoc SMS — `id` is a Pingram user id and can target the wrong contact.
-            "to": {"number": to_number},
-            "forceChannels": ["SMS"],
-            "sms": {
-                "message": f"Your verification code is: {otp_code}. Reply STOP to opt-out.",
-            },
-        }
-        response = None
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                response = await client.send(payload)
-                break
-            except Exception as exc:
-                status_code = getattr(exc, "status", None) or getattr(exc, "status_code", None)
-                is_retryable = status_code in {502, 503, 504}
-                if not is_retryable or attempt == max_attempts:
-                    raise
-                logger.warning(
-                    "Pingram temporary failure while sending OTP. attempt=%s status=%s number=%s error=%s",
-                    attempt,
-                    status_code,
-                    to_number,
-                    exc,
-                )
-                await asyncio.sleep(0.8 * attempt)
+    client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    body = f"Your verification code is: {otp_code}. Reply STOP to opt-out."
 
-        if response is None:
-            raise RuntimeError("Pingram SMS response missing after retries.")
-        tracking_id = getattr(response, "tracking_id", None)
-        messages = getattr(response, "messages", None) or []
-        logger.info(
-            "Pingram OTP SMS accepted. number=%s tracking_id=%s messages=%s",
-            to_number,
-            tracking_id,
-            messages,
-        )
-        # Pingram can acknowledge accepted delivery with tracking_id even when messages is empty.
-        # Fail only when both tracking metadata and messages are missing.
-        if not tracking_id and not messages:
-            raise RuntimeError("Pingram did not return tracking_id/messages for OTP SMS.")
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            message = client.messages.create(
+                body=body,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                to=to_number,
+            )
+            logger.info(
+                "Twilio OTP SMS sent. number=%s sid=%s status=%s",
+                to_number,
+                message.sid,
+                message.status,
+            )
+            return
+        except TwilioRestException as exc:
+            status_code = exc.status
+            is_retryable = status_code in {500, 502, 503, 504}
+            if not is_retryable or attempt == max_attempts:
+                raise
+            logger.warning(
+                "Twilio temporary failure while sending OTP. attempt=%s status=%s number=%s error=%s",
+                attempt,
+                status_code,
+                to_number,
+                exc,
+            )
+            time.sleep(0.8 * attempt)
 
 
 def _send_registration_otp(user: CoreUser) -> None:
@@ -165,7 +146,7 @@ def _send_registration_otp(user: CoreUser) -> None:
         timeout=expires_in,
     )
 
-    asyncio.run(_send_pingram_sms(user.phone or "", otp_code))
+    _send_twilio_sms(user.phone or "", otp_code)
 
 
 def _user_payload(user: CoreUser) -> dict:

@@ -1,12 +1,19 @@
 from django.db import models
 
 from vendly_backend.models.core import CoreStatus, CoreUser
-from vendly_backend.models.vendors import Vendor
+from vendly_backend.models.vendors import Vendor, VendorPackage
 
 
 class Booking(models.Model):
     customer = models.ForeignKey(CoreUser, on_delete=models.CASCADE, related_name="bookings")
     vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name="bookings")
+    vendor_package = models.ForeignKey(
+        VendorPackage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bookings",
+    )
     event_type = models.CharField(max_length=255)
     booking_date = models.DateTimeField()
     location = models.CharField(max_length=255, null=True, blank=True)

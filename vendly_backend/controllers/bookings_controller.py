@@ -11,7 +11,7 @@ from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 from vendly_backend.activity_log import log_activity
 from vendly_backend.booking_statuses import ALLOWED_BOOKING_STATUS_NAMES, get_booking_status_ref
-from vendly_backend.models import Booking, Vendor
+from vendly_backend.models import Booking, Vendor, VendorPackage
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
@@ -69,6 +69,7 @@ def bookings_list_view(request: Request) -> Response:
                 "location": "nullable|string|max:255",
                 "amount": "nullable|numeric",
                 "deposit": "nullable|numeric",
+                "package_id": "nullable|integer|exists:vendor_packages,id",
             },
             custom_messages={
                 "vendor_id.required": "vendor_id is required.",
@@ -77,6 +78,7 @@ def bookings_list_view(request: Request) -> Response:
                 "event_type.max": "event_type may not be greater than 255 characters.",
                 "booking_date.required": "booking_date is required.",
                 "booking_date.date": "booking_date must be a valid date (YYYY-MM-DD).",
+                "package_id.integer": "package_id must be an integer.",
             },
         )
         if errors:
@@ -98,9 +100,32 @@ def bookings_list_view(request: Request) -> Response:
         if deposit in (None, ""):
             deposit = None
 
+        raw_package_id = data.get("package_id")
+        vendor_package = None
+        if raw_package_id not in (None, ""):
+            try:
+                vendor_package = VendorPackage.objects.get(id=int(raw_package_id), vendor_id=vendor.id)
+            except VendorPackage.DoesNotExist:
+                return ResponseService.response(
+                    "VALIDATION_ERROR",
+                    {"package_id": ["The selected package does not belong to this vendor."]},
+                    "Validation Error",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if not vendor_package.is_active:
+                return ResponseService.response(
+                    "VALIDATION_ERROR",
+                    {"package_id": ["This package is not available."]},
+                    "Validation Error",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if amount is None:
+                amount = vendor_package.price
+
         booking = Booking.objects.create(
             customer=user,
             vendor=vendor,
+            vendor_package=vendor_package,
             event_type=event_type,
             booking_date=booking_date,
             location=location,
@@ -117,6 +142,7 @@ def bookings_list_view(request: Request) -> Response:
             payload={
                 "vendor_id": vendor.id,
                 "booking_status": booking.status.name if booking.status else None,
+                "package_id": booking.vendor_package_id,
                 "amount": str(booking.amount) if booking.amount is not None else None,
                 "deposit": str(booking.deposit) if booking.deposit is not None else None,
             },
@@ -142,6 +168,8 @@ def bookings_list_view(request: Request) -> Response:
             "event_type": booking.event_type,
             "booking_date": booking.booking_date,
             "vendor_id": booking.vendor.id,
+            "package_id": booking.vendor_package_id,
+            "amount": str(booking.amount) if booking.amount is not None else None,
         }
         return ResponseService.response("SUCCESS", payload, "Booking created successfully.", status.HTTP_201_CREATED)
 
@@ -158,6 +186,7 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
             "id": booking.id,
             "customer_id": booking.customer_id,
             "vendor_id": booking.vendor_id,
+            "package_id": booking.vendor_package_id,
             "event_type": booking.event_type,
             "booking_date": booking.booking_date,
             "location": booking.location,

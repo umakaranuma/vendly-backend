@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -437,44 +437,72 @@ def vendor_post_detail_view(request: Request, post_id: int) -> Response:
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def posts_collection_view(request: Request) -> Response:
     if request.method == "GET":
         # Same payload as /api/feed/posts (call impl directly — nested @api_view needs HttpRequest)
         return list_posts_impl(request)
+    if not request.user.is_authenticated:
+        return ResponseService.response(
+            "UNAUTHORIZED",
+            {"detail": "Authentication required."},
+            "Authentication required.",
+            status.HTTP_401_UNAUTHORIZED,
+        )
     return run_vendor_post_create(request)
 
 
 @api_view(["GET", "PUT", "DELETE"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def posts_detail_view(request: Request, post_id: int) -> Response:
     if request.method == "GET":
         return retrieve_post(request, post_id)
     if request.method == "PUT":
+        if not request.user.is_authenticated:
+            return ResponseService.response(
+                "UNAUTHORIZED",
+                {"detail": "Authentication required."},
+                "Authentication required.",
+                status.HTTP_401_UNAUTHORIZED,
+            )
         vendor, err = _require_vendor(request)
         if err is not None:
             return err
         return update_vendor_post(request, vendor, post_id)
-    if is_admin_user(request.user):
+    if request.method == "DELETE":
+        if not request.user.is_authenticated:
+            return ResponseService.response(
+                "UNAUTHORIZED",
+                {"detail": "Authentication required."},
+                "Authentication required.",
+                status.HTTP_401_UNAUTHORIZED,
+            )
+        if is_admin_user(request.user):
+            try:
+                post = Post.objects.get(id=post_id)
+            except Post.DoesNotExist:
+                return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+            post.delete()
+            return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
+        vendor, err = _require_vendor(request)
+        if err is not None:
+            return err
         try:
-            post = Post.objects.get(id=post_id)
+            post = Post.objects.get(id=post_id, vendor=vendor)
+            post.delete()
+            return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
         except Post.DoesNotExist:
             return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
-        post.delete()
-        return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
-    vendor, err = _require_vendor(request)
-    if err is not None:
-        return err
-    try:
-        post = Post.objects.get(id=post_id, vendor=vendor)
-        post.delete()
-        return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
-    except Post.DoesNotExist:
-        return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+    return ResponseService.response(
+        "METHOD_NOT_ALLOWED",
+        {"detail": "Method not allowed."},
+        "Method not allowed.",
+        status.HTTP_405_METHOD_NOT_ALLOWED,
+    )
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def vendor_posts_by_vendor_id_view(request: Request, vendor_id: int) -> Response:
     try:
         Vendor.objects.get(pk=vendor_id)

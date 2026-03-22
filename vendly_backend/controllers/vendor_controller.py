@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 
 from django.core.exceptions import ValidationError
+from django.core.paginator import Paginator
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -14,6 +15,7 @@ from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 
 from vendly_backend.models import Vendor
+from vendly_backend.permissions import is_admin_user
 
 
 def _require_vendor(request: Request) -> tuple[Vendor | None, Response | None]:
@@ -201,3 +203,154 @@ def vendor_profile_view(request: Request) -> Response:
     if request.method == "GET":
         return get_vendor_profile(request, vendor)
     return patch_vendor_profile(request, vendor)
+
+
+def _public_vendor_status_display(vendor: Vendor) -> str:
+    if getattr(vendor, "status_ref", None):
+        return vendor.status_ref.name
+    if vendor.status == "approved":
+        return "active"
+    return vendor.status
+
+
+def _public_vendor_payload(vendor: Vendor) -> dict:
+    """Vendor row plus linked user profile (avatar, cover, names) for public API responses."""
+    u = vendor.user
+    cat = vendor.category
+    return {
+        "id": vendor.id,
+        "name": vendor.name,
+        "slug": vendor.slug,
+        "city": vendor.city,
+        "category_id": vendor.category_id,
+        "category": (
+            {"id": cat.id, "name": cat.name, "slug": cat.slug}
+            if cat
+            else None
+        ),
+        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+        "review_count": vendor.review_count,
+        "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+        "bio": vendor.bio,
+        "status": _public_vendor_status_display(vendor),
+        "created_at": vendor.created_at.isoformat() if vendor.created_at else None,
+        "user": {
+            "id": u.id,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "avatar_url": u.avatar_url,
+            "cover_url": u.cover_url,
+            "bio": u.bio,
+        },
+    }
+
+
+def list_public_vendors(request: Request) -> Response:
+    """Paginated list of approved vendors with profile images and related fields (public)."""
+    try:
+        page = int(request.GET.get("page", 1))
+        limit = int(request.GET.get("limit", 20))
+        if page < 1 or limit < 1:
+            raise ValueError("Invalid pagination")
+
+        qs = (
+            Vendor.objects.filter(status="approved")
+            .select_related("user", "category", "status_ref")
+            .order_by("-created_at")
+        )
+        paginator = Paginator(qs, limit)
+        page_obj = paginator.get_page(page)
+        data = [_public_vendor_payload(v) for v in page_obj.object_list]
+        result = {
+            "total_records": paginator.count,
+            "per_page": limit,
+            "current_page": page_obj.number,
+            "last_page": paginator.num_pages or 1,
+            "data": data,
+        }
+        return ResponseService.response(
+            "SUCCESS",
+            result,
+            "Vendors fetched successfully.",
+            status.HTTP_200_OK,
+        )
+    except (ValueError, ValidationError):
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            {"pagination": ["Invalid parameters"]},
+            "Invalid Request",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
+
+
+def retrieve_public_vendor(request: Request, vendor_id: int) -> Response:
+    """Single approved vendor (public)."""
+    try:
+        vendor = (
+            Vendor.objects.filter(status="approved", pk=vendor_id)
+            .select_related("user", "category", "status_ref")
+            .first()
+        )
+        if vendor is None:
+            return ResponseService.response(
+                "NOT_FOUND",
+                {},
+                "Vendor not found.",
+                status.HTTP_404_NOT_FOUND,
+            )
+        return ResponseService.response(
+            "SUCCESS",
+            _public_vendor_payload(vendor),
+            "Vendor fetched successfully.",
+            status.HTTP_200_OK,
+        )
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
+
+
+def delete_vendor_as_admin(request: Request, vendor_id: int) -> Response:
+    """Remove vendor profile; admin only. Linked user account remains (use admin user tools to suspend)."""
+    if not request.user.is_authenticated:
+        return ResponseService.response(
+            "UNAUTHORIZED",
+            {"detail": "Authentication required."},
+            "Authentication required.",
+            status.HTTP_401_UNAUTHORIZED,
+        )
+    if not is_admin_user(request.user):
+        return ResponseService.response(
+            "FORBIDDEN",
+            {"detail": "Only administrators can delete a vendor."},
+            "Forbidden",
+            status.HTTP_403_FORBIDDEN,
+        )
+    try:
+        vendor = Vendor.objects.select_related("user").get(pk=vendor_id)
+    except Vendor.DoesNotExist:
+        return ResponseService.response(
+            "NOT_FOUND",
+            {},
+            "Vendor not found.",
+            status.HTTP_404_NOT_FOUND,
+        )
+    try:
+        vendor.delete()
+        return ResponseService.response("SUCCESS", {}, "Vendor deleted.", status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def public_vendors_list_view(request: Request) -> Response:
+    return list_public_vendors(request)
+
+
+@api_view(["GET", "DELETE"])
+@permission_classes([AllowAny])
+def public_vendor_detail_view(request: Request, vendor_id: int) -> Response:
+    if request.method == "GET":
+        return retrieve_public_vendor(request, vendor_id)
+    return delete_vendor_as_admin(request, vendor_id)

@@ -60,7 +60,11 @@ from vendly_backend.controllers.auth_controller import (
     register_customer,
     register_vendor,
 )
-from vendly_backend.controllers.vendor_controller import vendor_profile_view
+from vendly_backend.controllers.vendor_controller import (
+    public_vendor_detail_view,
+    public_vendors_list_view,
+    vendor_profile_view,
+)
 from vendly_backend.controllers.feed_controller import list_posts, post_like, post_comments, comment_like
 from vendly_backend.controllers.bookings_controller import bookings_list_view, booking_detail_view
 from vendly_backend.controllers.reviews_controller import vendor_reviews_view
@@ -132,6 +136,9 @@ urlpatterns = [
     
     # Favorites
     path("api/users/favorites", favorites_list_view),
+    # Public vendor directory (GET list/detail; DELETE detail is admin-only)
+    path("api/vendors", public_vendors_list_view),
+    path("api/vendors/<int:vendor_id>", public_vendor_detail_view),
     path("api/vendors/<int:vendor_id>/favorite", favorite_vendor_view),
 
     # Bookings

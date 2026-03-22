@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Exists, OuterRef, Prefetch
+from django.db.models import BooleanField, Exists, OuterRef, Prefetch, Value
 
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
@@ -87,13 +87,16 @@ def list_posts_impl(request: Request, vendor_id: int | None = None) -> Response:
                     queryset=PostMedia.objects.order_by("sort_order", "id"),
                 )
             )
-            .annotate(
+            .order_by("-created_at")
+        )
+        if user.is_authenticated:
+            base = base.annotate(
                 is_liked_by_me=Exists(
                     PostLike.objects.filter(post_id=OuterRef("pk"), user_id=user.id)
                 )
             )
-            .order_by("-created_at")
-        )
+        else:
+            base = base.annotate(is_liked_by_me=Value(False, output_field=BooleanField()))
         if vendor_id is not None:
             base = base.filter(vendor_id=vendor_id)
 
@@ -119,7 +122,7 @@ def retrieve_feed_post_impl(request: Request, post_id: int) -> Response:
     try:
         user = request.user
         try:
-            post = (
+            qs = (
                 Post.objects.select_related("vendor", "vendor__user", "vendor__category")
                 .prefetch_related(
                     Prefetch(
@@ -127,13 +130,16 @@ def retrieve_feed_post_impl(request: Request, post_id: int) -> Response:
                         queryset=PostMedia.objects.order_by("sort_order", "id"),
                     )
                 )
-                .annotate(
+            )
+            if user.is_authenticated:
+                qs = qs.annotate(
                     is_liked_by_me=Exists(
                         PostLike.objects.filter(post_id=OuterRef("pk"), user_id=user.id)
                     )
                 )
-                .get(pk=post_id)
-            )
+            else:
+                qs = qs.annotate(is_liked_by_me=Value(False, output_field=BooleanField()))
+            post = qs.get(pk=post_id)
         except Post.DoesNotExist:
             return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
         return ResponseService.response(

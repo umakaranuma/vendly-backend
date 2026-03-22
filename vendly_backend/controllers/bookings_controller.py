@@ -21,13 +21,6 @@ def bookings_list_view(request: Request) -> Response:
             booking_status = request.GET.get("status", "")
             
             query = QueryBuilderService("bookings")
-            
-            if hasattr(user, 'vendor') and user.vendor:
-                # If the user is a vendor, get vendor bookings
-                query = query.apply_conditions(f'{{"vendor_id": {user.vendor.id}}}', ["vendor_id"], "", [])
-            else:
-                # Customers get their own bookings
-                query = query.apply_conditions(f'{{"customer_id": {user.id}}}', ["customer_id"], "", [])
 
             if booking_status:
                 query = query.apply_conditions(f'{{"status": "{booking_status}"}}', ["status"], "", [])
@@ -112,13 +105,6 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
         booking = Booking.objects.get(id=booking_id)
     except Booking.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Booking not found.", status.HTTP_404_NOT_FOUND)
-
-    user = request.user
-    is_customer = booking.customer_id == user.id
-    is_vendor = hasattr(user, 'vendor') and user.vendor and booking.vendor_id == user.vendor.id
-    
-    if not (is_customer or is_vendor):
-        return ResponseService.response("FORBIDDEN", {}, "Access denied.", status.HTTP_403_FORBIDDEN)
 
     if request.method == "GET":
         payload = {

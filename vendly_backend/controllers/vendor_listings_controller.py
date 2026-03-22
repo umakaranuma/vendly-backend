@@ -7,10 +7,8 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import Listing
-from vendly_backend.permissions import IsVendor
-
 @api_view(["GET", "POST"])
-@permission_classes([IsAuthenticated, IsVendor])
+@permission_classes([IsAuthenticated])
 def vendor_listings_view(request: Request) -> Response:
     vendor = request.user.vendor
     
@@ -57,7 +55,7 @@ def vendor_listings_view(request: Request) -> Response:
         return ResponseService.response("SUCCESS", payload, "Listing created successfully.", status.HTTP_201_CREATED)
 
 @api_view(["PUT", "DELETE"])
-@permission_classes([IsAuthenticated, IsVendor])
+@permission_classes([IsAuthenticated])
 def vendor_listing_detail_view(request: Request, listing_id: int) -> Response:
     try:
         listing = Listing.objects.get(id=listing_id, vendor=request.user.vendor)

@@ -11,8 +11,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from vendly_backend.controllers.auth_controller import apply_self_profile_patch, _my_profile_payload
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
-from vendly_backend.permissions import IsAdmin, is_admin_user
 
 
 def _get_status_ref(entity_type: str, status_type: str, name: str):
@@ -44,6 +44,9 @@ def _serialize_user(user: CoreUser) -> dict:
         "phone": user.phone,
         "first_name": user.first_name,
         "last_name": user.last_name,
+        "avatar_url": user.avatar_url,
+        "cover_url": user.cover_url,
+        "bio": user.bio,
         "is_active": user.is_active,
         "is_verified": user.is_verified,
         "status": user_status,
@@ -52,7 +55,7 @@ def _serialize_user(user: CoreUser) -> dict:
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def list_users(request: Request) -> Response:
     return _list_users_response(request)
 
@@ -115,7 +118,7 @@ def _list_users_response(request: Request, forced_user_id: int | None = None) ->
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def retrieve_user(request: Request, user_id: int) -> Response:
     try:
         user = CoreUser.objects.select_related("role").get(pk=user_id)
@@ -137,21 +140,63 @@ def retrieve_user(request: Request, user_id: int) -> Response:
     )
 
 
+def _resolve_users_target_id(path_user_id: int | None, request: Request) -> tuple[int | None, Response | None]:
+    """
+    Returns (target_id, error_response).
+    If both path id and `?id=` are present, they must match.
+    """
+    raw = request.GET.get("id")
+    if path_user_id is not None:
+        if raw is not None and str(raw).strip() != "":
+            try:
+                q = int(raw)
+            except (TypeError, ValueError):
+                return None, ResponseService.response(
+                    "VALIDATION_ERROR",
+                    {"id": ["Invalid id."]},
+                    "Validation Error",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if q != path_user_id:
+                return None, ResponseService.response(
+                    "VALIDATION_ERROR",
+                    {"id": ["Query id must match path id."]},
+                    "Validation Error",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+        return path_user_id, None
+    if raw is not None and str(raw).strip() != "":
+        try:
+            return int(raw), None
+        except (TypeError, ValueError):
+            return None, ResponseService.response(
+                "VALIDATION_ERROR",
+                {"id": ["Invalid id."]},
+                "Validation Error",
+                status.HTTP_400_BAD_REQUEST,
+            )
+    return None, None
+
+
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
-def users_view(request: Request) -> Response:
+def users_view(request: Request, path_user_id: int | None = None) -> Response:
     """
-    Unified user endpoint:
-    - Non-admin: allow only their own user via `?id=<their_id>` (or `id` omitted => returns themselves as a 1-item list).
-    - Admin: supports listing via `GET /api/users` and retrieving via `GET /api/users?id=<user_id>`.
+    Unified user endpoint (any authenticated user):
+    - `GET /api/users` lists users (paginated query builder).
+    - `GET /api/users/<id>` or `?id=` fetches one user (full profile payload).
+    - `PATCH /api/users`, `PATCH /api/users/<id>`, or `?id=` updates that user (same fields as my-profile).
+    Admin bulk role/status updates remain on `/api/admin/users/<user_id>/update`.
     """
 
-    is_admin = is_admin_user(request.user)
-    user_id = request.GET.get("id")
+    resolved_id, resolve_err = _resolve_users_target_id(path_user_id, request)
+    if resolve_err is not None:
+        return resolve_err
+
+    query_id_raw = request.GET.get("id")
+    user_id = str(resolved_id) if resolved_id is not None else query_id_raw
 
     if request.method == "PATCH":
-        # Profile update via the same endpoint, limited to the authenticated user's own record.
-        # (Admin full update remains on `/api/admin/users/<user_id>/update`.)
         if user_id:
             try:
                 target_id = int(user_id)
@@ -165,14 +210,6 @@ def users_view(request: Request) -> Response:
         else:
             target_id = request.user.id
 
-        if target_id != request.user.id:
-            return ResponseService.response(
-                "FORBIDDEN",
-                {},
-                "You are not allowed to update this user.",
-                status.HTTP_403_FORBIDDEN,
-            )
-
         try:
             target_user = CoreUser.objects.get(pk=target_id)
         except CoreUser.DoesNotExist:
@@ -184,15 +221,7 @@ def users_view(request: Request) -> Response:
             )
 
         data = request.data
-        errors = ValidatorService.validate(
-            data,
-            rules={
-                "first_name": "nullable",
-                "last_name": "nullable",
-                "phone": "nullable",
-            },
-            custom_messages={},
-        )
+        update_fields, errors = apply_self_profile_patch(target_user, data)
         if errors:
             return ResponseService.response(
                 "VALIDATION_ERROR",
@@ -200,21 +229,15 @@ def users_view(request: Request) -> Response:
                 "Validation Error",
                 status.HTTP_400_BAD_REQUEST,
             )
+        if update_fields:
+            target_user.save(update_fields=update_fields)
 
-        changed_fields = []
-        for field in ["first_name", "last_name", "phone"]:
-            if field in data:
-                setattr(target_user, field, data.get(field))
-                changed_fields.append(field)
-
-        if changed_fields:
-            target_user.save(update_fields=changed_fields)
-        else:
-            target_user.save()
-
+        target_user = CoreUser.objects.select_related("role", "status_ref", "vendor", "vendor__category").get(
+            pk=target_id
+        )
         return ResponseService.response(
             "SUCCESS",
-            _serialize_user(target_user),
+            _my_profile_payload(target_user),
             "Profile updated successfully.",
             status.HTTP_200_OK,
         )
@@ -231,7 +254,9 @@ def users_view(request: Request) -> Response:
             )
 
         try:
-            target_user = CoreUser.objects.select_related("role").get(pk=target_id)
+            target_user = CoreUser.objects.select_related("role", "status_ref", "vendor", "vendor__category").get(
+                pk=target_id
+            )
         except CoreUser.DoesNotExist:
             return ResponseService.response(
                 "NOT_FOUND",
@@ -240,33 +265,19 @@ def users_view(request: Request) -> Response:
                 status.HTTP_404_NOT_FOUND,
             )
 
-        if not is_admin and target_user.id != request.user.id:
-            return ResponseService.response(
-                "FORBIDDEN",
-                {},
-                "You are not allowed to access this user.",
-                status.HTTP_403_FORBIDDEN,
-            )
-
         return ResponseService.response(
             "SUCCESS",
-            _serialize_user(target_user),
+            _my_profile_payload(target_user),
             "User fetched successfully.",
             status.HTTP_200_OK,
         )
 
-    # No `id` provided
-    # - Non-admin: behave like the old `/api/users/me` (single user object).
-    # - Admin: list all users.
-    if not is_admin:
-        return _list_users_response(request, forced_user_id=request.user.id)
-
-    # Admin listing (matches existing `/api/admin/users` filters)
+    # No `id` provided — list users (same filters as admin user list).
     return _list_users_response(request)
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def update_user(request: Request, user_id: int) -> Response:
     try:
         user = CoreUser.objects.get(pk=user_id)
@@ -323,7 +334,7 @@ def update_user(request: Request, user_id: int) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def block_user(request: Request, user_id: int) -> Response:
     try:
         user = CoreUser.objects.get(pk=user_id)
@@ -358,7 +369,7 @@ def block_user(request: Request, user_id: int) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def unblock_user(request: Request, user_id: int) -> Response:
     try:
         user = CoreUser.objects.get(pk=user_id)
@@ -393,7 +404,7 @@ def unblock_user(request: Request, user_id: int) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def change_user_status(request: Request) -> Response:
     """
     Single endpoint for admin to change user status.
@@ -449,7 +460,7 @@ def change_user_status(request: Request) -> Response:
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def list_vendors(request: Request) -> Response:
     try:
         page = int(request.GET.get("page", 1))
@@ -502,7 +513,7 @@ def list_vendors(request: Request) -> Response:
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def retrieve_vendor(request: Request, vendor_id: int) -> Response:
     try:
         vendor = Vendor.objects.select_related("user", "user__role", "status_ref").get(pk=vendor_id)
@@ -539,7 +550,7 @@ def retrieve_vendor(request: Request, vendor_id: int) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def approve_vendor(request: Request, vendor_id: int) -> Response:
     try:
         vendor = Vendor.objects.get(pk=vendor_id)
@@ -581,7 +592,7 @@ def approve_vendor(request: Request, vendor_id: int) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def reject_vendor(request: Request, vendor_id: int) -> Response:
     try:
         vendor = Vendor.objects.get(pk=vendor_id)
@@ -624,7 +635,7 @@ def reject_vendor(request: Request, vendor_id: int) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def suspend_vendor(request: Request, vendor_id: int) -> Response:
     try:
         vendor = Vendor.objects.select_related("status_ref").get(pk=vendor_id)
@@ -662,14 +673,14 @@ def suspend_vendor(request: Request, vendor_id: int) -> Response:
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def resume_vendor(request: Request, vendor_id: int) -> Response:
     # Resume from suspension -> treat as approved/active.
     return approve_vendor(request, vendor_id)
 
 
 @api_view(["POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def change_vendor_status(request: Request) -> Response:
     """
     Single endpoint for admin to change vendor status.

@@ -3,11 +3,71 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework import status
+from django.core.paginator import Paginator
 from django.db import transaction
+from django.db.models import Exists, OuterRef, Prefetch
 
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
-from vendly_backend.models import Post, PostLike, Comment, CommentLike
+from vendly_backend.models import Post, PostLike, PostMedia, Comment, CommentLike
+
+
+def _serialize_feed_post(post: Post) -> dict:
+    vendor = post.vendor
+    vu = vendor.user
+    cat = vendor.category
+    media_qs = post.media.all()
+    media_list = [
+        {
+            "id": m.id,
+            "url": m.url,
+            "is_video": m.is_video,
+            "sort_order": m.sort_order,
+        }
+        for m in media_qs
+    ]
+    images = [m for m in media_list if not m["is_video"]]
+    videos = [m for m in media_list if m["is_video"]]
+
+    return {
+        "id": post.id,
+        "vendor_id": vendor.id,
+        "caption": post.caption,
+        "like_count": post.like_count,
+        "comment_count": post.comment_count,
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+        "updated_at": post.updated_at.isoformat() if post.updated_at else None,
+        "is_liked_by_me": bool(getattr(post, "is_liked_by_me", False)),
+        "media": media_list,
+        "images": images,
+        "videos": videos,
+        "vendor": {
+            "id": vendor.id,
+            "name": vendor.name,
+            "slug": vendor.slug,
+            "city": vendor.city,
+            "bio": vendor.bio,
+            "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+            "review_count": vendor.review_count,
+            "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+            "status": vendor.status,
+            "category_id": vendor.category_id,
+            "category": (
+                {"id": cat.id, "name": cat.name, "slug": cat.slug}
+                if cat
+                else None
+            ),
+            "user": {
+                "id": vu.id,
+                "first_name": vu.first_name,
+                "last_name": vu.last_name,
+                "avatar_url": vu.avatar_url,
+                "cover_url": vu.cover_url,
+                "bio": vu.bio,
+            },
+        },
+    }
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -15,15 +75,37 @@ def list_posts(request: Request) -> Response:
     try:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 20))
-        
-        # In a real scenario we'd use QueryBuilderService properly to join media and vendors
-        # For simplicity based on SKILL.md:
-        query = (
-            QueryBuilderService("posts")
-            .select("posts.id", "posts.vendor_id", "posts.caption", "posts.like_count", "posts.comment_count", "posts.created_at")
-            .paginate(page, limit, ["posts.created_at"], "posts.created_at", "desc")
+        user = request.user
+
+        base = (
+            Post.objects.select_related("vendor", "vendor__user", "vendor__category")
+            .prefetch_related(
+                Prefetch(
+                    "media",
+                    queryset=PostMedia.objects.order_by("sort_order", "id"),
+                )
+            )
+            .annotate(
+                is_liked_by_me=Exists(
+                    PostLike.objects.filter(post_id=OuterRef("pk"), user_id=user.id)
+                )
+            )
+            .order_by("-created_at")
         )
-        return ResponseService.response("SUCCESS", query, "Posts retrieved successfully.")
+
+        paginator = Paginator(base, limit)
+        page_obj = paginator.get_page(page)
+
+        data = [_serialize_feed_post(p) for p in page_obj.object_list]
+
+        result = {
+            "total_records": paginator.count,
+            "per_page": limit,
+            "current_page": page_obj.number,
+            "last_page": paginator.num_pages or 1,
+            "data": data,
+        }
+        return ResponseService.response("SUCCESS", result, "Posts retrieved successfully.")
     except Exception as e:
         return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 

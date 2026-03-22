@@ -13,7 +13,7 @@ from rest_framework.response import Response
 import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
-from vendly_backend.controllers.feed_controller import list_posts_impl
+from vendly_backend.controllers.feed_controller import list_posts_impl, retrieve_feed_post_impl
 from vendly_backend.models import Post, PostMedia, Vendor
 from vendly_backend.permissions import is_admin_user
 from vendly_backend.supabase_media import (
@@ -38,7 +38,14 @@ def _require_vendor(request: Request):
 
 
 def _is_multipart(request: Request) -> bool:
+    """
+    True when the client intends a multipart upload (caption + files).
+    Explicit JSON is never treated as multipart so we do not hit Supabase upload
+    for application/json bodies (same behavior as dedicated create routes).
+    """
     ct = (request.content_type or "").lower()
+    if "application/json" in ct:
+        return False
     if "multipart/form-data" in ct:
         return True
     # Clients sometimes omit or mis-set Content-Type; Django still populates FILES.
@@ -114,52 +121,7 @@ def list_vendor_posts(request: Request, vendor) -> Response:
 
 
 def retrieve_post(request: Request, post_id: int) -> Response:
-    try:
-        filters: dict[str, object] = {"id": int(post_id)}
-        filter_json = json.dumps(filters)
-        filter_keys = list(filters.keys())
-
-        query = (
-            QueryBuilderService("posts")
-            .select(
-                "posts.id",
-                "posts.caption",
-                "posts.like_count",
-                "posts.comment_count",
-                "posts.created_at",
-            )
-            .apply_conditions(
-                filter_json,
-                filter_keys,
-                "",
-                ["posts.caption"],
-            )
-            .paginate(1, 1, ["posts.created_at"], "posts.created_at", "desc")
-        )
-        rows = query.get("data") or []
-        if not rows:
-            return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
-        return ResponseService.response(
-            "SUCCESS",
-            rows[0],
-            "Post retrieved successfully.",
-        )
-    except ValidationError as e:
-        return ResponseService.response(
-            "VALIDATION_ERROR",
-            getattr(e, "message_dict", None) or {"detail": [str(e)]},
-            "Validation Error",
-            status.HTTP_400_BAD_REQUEST,
-        )
-    except (ValueError, json.JSONDecodeError):
-        return ResponseService.response(
-            "VALIDATION_ERROR",
-            {"pagination": ["Invalid parameters"]},
-            "Invalid Request",
-            status.HTTP_400_BAD_REQUEST,
-        )
-    except Exception as e:
-        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
+    return retrieve_feed_post_impl(request, post_id)
 
 
 def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
@@ -434,6 +396,14 @@ def _persist_post(vendor, caption: str, media_list: list) -> Response:
     return ResponseService.response("SUCCESS", payload, "Post created successfully.", status.HTTP_201_CREATED)
 
 
+def run_vendor_post_create(request: Request) -> Response:
+    """Shared by POST /api/posts/create, POST /api/vendor/posts, and POST /api/posts."""
+    vendor, err = _require_vendor(request)
+    if err is not None:
+        return err
+    return create_vendor_post(request, vendor)
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def vendor_posts_view(request: Request) -> Response:
@@ -449,10 +419,7 @@ def vendor_posts_view(request: Request) -> Response:
 @permission_classes([IsAuthenticated])
 def vendor_post_create_view(request: Request) -> Response:
     """Alias for POST /api/vendor/posts — multipart or JSON body."""
-    vendor, err = _require_vendor(request)
-    if err is not None:
-        return err
-    return create_vendor_post(request, vendor)
+    return run_vendor_post_create(request)
 
 
 @api_view(["DELETE"])
@@ -475,10 +442,7 @@ def posts_collection_view(request: Request) -> Response:
     if request.method == "GET":
         # Same payload as /api/feed/posts (call impl directly — nested @api_view needs HttpRequest)
         return list_posts_impl(request)
-    vendor, err = _require_vendor(request)
-    if err is not None:
-        return err
-    return create_vendor_post(request, vendor)
+    return run_vendor_post_create(request)
 
 
 @api_view(["GET", "PUT", "DELETE"])

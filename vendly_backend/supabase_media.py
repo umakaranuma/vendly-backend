@@ -15,6 +15,12 @@ class SupabaseNotConfiguredError(RuntimeError):
     pass
 
 
+class SupabaseBucketNotFoundError(RuntimeError):
+    """The Storage bucket name in settings does not exist in this Supabase project."""
+
+    pass
+
+
 class MediaValidationError(ValueError):
     pass
 
@@ -104,11 +110,24 @@ def upload_bytes_to_supabase(
     bucket = getattr(settings, "SUPABASE_STORAGE_BUCKET", "media")
 
     supabase = _client()
-    supabase.storage.from_(bucket).upload(
-        object_path,
-        file_bytes,
-        file_options={"content-type": content_type},
-    )
+    try:
+        supabase.storage.from_(bucket).upload(
+            object_path,
+            file_bytes,
+            file_options={"content-type": content_type},
+        )
+    except Exception as exc:
+        err_text = str(exc).lower()
+        if "bucket not found" in err_text or (
+            "404" in str(exc) and "bucket" in err_text
+        ):
+            raise SupabaseBucketNotFoundError(
+                f"Supabase Storage bucket '{bucket}' was not found. "
+                "In the Supabase Dashboard go to Storage → create a bucket with this name "
+                "(or set SUPABASE_BUCKET / SUPABASE_STORAGE_BUCKET in .env to an existing bucket). "
+                "For public URLs, mark the bucket as public or add a policy for uploads."
+            ) from exc
+        raise
     return public_url_for_storage_path(object_path)
 
 

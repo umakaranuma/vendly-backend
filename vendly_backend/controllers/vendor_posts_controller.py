@@ -13,6 +13,7 @@ from rest_framework.response import Response
 import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
+from vendly_backend.controllers.feed_controller import list_posts_impl
 from vendly_backend.models import Post, PostMedia, Vendor
 from vendly_backend.permissions import is_admin_user
 from vendly_backend.supabase_media import (
@@ -59,76 +60,6 @@ def list_vendor_posts(request: Request, vendor) -> Response:
             if not isinstance(extra, dict):
                 raise ValueError("filters must be a JSON object")
             extra.pop("vendor_id", None)
-            if "id" in extra:
-                filters["id"] = int(extra["id"])
-
-        sort_map = {
-            "created_at": "posts.created_at",
-            "like_count": "posts.like_count",
-            "comment_count": "posts.comment_count",
-        }
-        if sort_by not in sort_map:
-            raise ValueError("Invalid sort_by")
-        sort_col = sort_map[sort_by]
-        if sort_dir not in ("asc", "desc"):
-            raise ValueError("Invalid sort_dir")
-
-        filter_json = json.dumps(filters)
-        filter_keys = list(filters.keys())
-
-        query = (
-            QueryBuilderService("posts")
-            .select(
-                "posts.id",
-                "posts.caption",
-                "posts.like_count",
-                "posts.comment_count",
-                "posts.created_at",
-            )
-            .apply_conditions(
-                filter_json,
-                filter_keys,
-                search_string,
-                ["posts.caption"],
-            )
-            .paginate(page, limit, [sort_col], sort_col, sort_dir)
-        )
-        return ResponseService.response("SUCCESS", query, "Posts retrieved successfully.")
-    except ValidationError as e:
-        return ResponseService.response(
-            "VALIDATION_ERROR",
-            getattr(e, "message_dict", None) or {"detail": [str(e)]},
-            "Validation Error",
-            status.HTTP_400_BAD_REQUEST,
-        )
-    except (ValueError, json.JSONDecodeError):
-        return ResponseService.response(
-            "VALIDATION_ERROR",
-            {"pagination": ["Invalid parameters"]},
-            "Invalid Request",
-            status.HTTP_400_BAD_REQUEST,
-        )
-    except Exception as e:
-        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
-
-
-def list_all_posts(request: Request) -> Response:
-    """List posts across all vendors (optional `filters` JSON: vendor_id, id)."""
-    try:
-        page = int(request.GET.get("page", 1))
-        limit = int(request.GET.get("limit", 20))
-        search_string = request.GET.get("search", "") or ""
-        sort_by = (request.GET.get("sort_by") or "created_at").strip().lower()
-        sort_dir = (request.GET.get("sort_dir") or "desc").strip().lower()
-
-        filters: dict[str, object] = {}
-        raw_filters = request.GET.get("filters")
-        if raw_filters is not None and str(raw_filters).strip() != "":
-            extra = json.loads(raw_filters)
-            if not isinstance(extra, dict):
-                raise ValueError("filters must be a JSON object")
-            if "vendor_id" in extra:
-                filters["vendor_id"] = int(extra["vendor_id"])
             if "id" in extra:
                 filters["id"] = int(extra["id"])
 
@@ -542,7 +473,8 @@ def vendor_post_detail_view(request: Request, post_id: int) -> Response:
 @permission_classes([IsAuthenticated])
 def posts_collection_view(request: Request) -> Response:
     if request.method == "GET":
-        return list_all_posts(request)
+        # Same payload as /api/feed/posts (call impl directly — nested @api_view needs HttpRequest)
+        return list_posts_impl(request)
     vendor, err = _require_vendor(request)
     if err is not None:
         return err
@@ -581,7 +513,8 @@ def posts_detail_view(request: Request, post_id: int) -> Response:
 @permission_classes([IsAuthenticated])
 def vendor_posts_by_vendor_id_view(request: Request, vendor_id: int) -> Response:
     try:
-        vendor = Vendor.objects.get(pk=vendor_id)
+        Vendor.objects.get(pk=vendor_id)
     except Vendor.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Vendor not found.", status.HTTP_404_NOT_FOUND)
-    return list_vendor_posts(request, vendor)
+    # Same rich payload as GET /api/posts and GET /api/feed/posts (media, vendor, is_liked_by_me, …)
+    return list_posts_impl(request, vendor_id=vendor_id)

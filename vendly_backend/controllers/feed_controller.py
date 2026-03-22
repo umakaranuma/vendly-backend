@@ -69,9 +69,11 @@ def _serialize_feed_post(post: Post) -> dict:
     }
 
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def list_posts(request: Request) -> Response:
+def list_posts_impl(request: Request, vendor_id: int | None = None) -> Response:
+    """
+    Core feed list logic; safe to call from another DRF view (avoids nested @api_view).
+    When ``vendor_id`` is set, only that vendor's posts are returned (same payload shape as the global feed).
+    """
     try:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 20))
@@ -92,6 +94,8 @@ def list_posts(request: Request) -> Response:
             )
             .order_by("-created_at")
         )
+        if vendor_id is not None:
+            base = base.filter(vendor_id=vendor_id)
 
         paginator = Paginator(base, limit)
         page_obj = paginator.get_page(page)
@@ -108,6 +112,12 @@ def list_posts(request: Request) -> Response:
         return ResponseService.response("SUCCESS", result, "Posts retrieved successfully.")
     except Exception as e:
         return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def list_posts(request: Request) -> Response:
+    return list_posts_impl(request)
 
 @api_view(["POST", "DELETE"])
 @permission_classes([IsAuthenticated])

@@ -11,9 +11,6 @@ from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ResponseService import ResponseService
 from mServices.ValidatorService import ValidatorService
 from vendly_backend.models import InvitationTemplateType
-from vendly_backend.permissions import IsAdmin
-
-
 def _build_type_key(name: str) -> str:
     normalized = slugify((name or "").strip()).replace("-", "_")
     return f"template_{normalized}" if normalized else "template_type"
@@ -57,7 +54,7 @@ def template_types_public_view(request: Request) -> Response:
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_template_types_view(request: Request) -> Response:
     if request.method == "GET":
         try:
@@ -123,7 +120,7 @@ def admin_template_types_view(request: Request) -> Response:
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_template_type_detail_view(request: Request, type_id: int) -> Response:
     try:
         item = InvitationTemplateType.objects.get(id=type_id)

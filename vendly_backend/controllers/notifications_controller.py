@@ -7,12 +7,10 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import CoreUser, Notification, UserNotificationSetting
-from vendly_backend.permissions import is_admin_user
 
 
 def _resolve_target_user(request: Request):
-    is_admin = is_admin_user(request.user)
-
+    """Optional `?id=` selects which user; defaults to the authenticated user."""
     user_id = request.GET.get("id")
     if user_id is None:
         return request.user, None
@@ -25,14 +23,6 @@ def _resolve_target_user(request: Request):
             {"id": ["Invalid id."]},
             "Validation Error",
             status.HTTP_400_BAD_REQUEST,
-        )
-
-    if not is_admin and target_user_id != request.user.id:
-        return None, ResponseService.response(
-            "FORBIDDEN",
-            {},
-            "You are not allowed to access this user's notifications.",
-            status.HTTP_403_FORBIDDEN,
         )
 
     try:

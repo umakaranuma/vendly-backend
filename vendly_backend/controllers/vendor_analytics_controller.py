@@ -7,10 +7,8 @@ from django.db.models import Sum
 
 from mServices.ResponseService import ResponseService
 from vendly_backend.models import Booking, VendorView, PostLike, CommentLike
-from vendly_backend.permissions import IsVendor
-
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsVendor])
+@permission_classes([IsAuthenticated])
 def vendor_analytics_view(request: Request) -> Response:
     vendor = request.user.vendor
     date_from = request.GET.get("from")

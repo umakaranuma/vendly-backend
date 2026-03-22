@@ -18,7 +18,7 @@ from vendly_backend.models import (
     CoreUser,
     Message,
 )
-from vendly_backend.permissions import IsAdmin
+
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
@@ -262,7 +262,7 @@ def report_chat_messages_view(request: Request, conversation_id: int) -> Respons
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_chat_reports_view(request: Request) -> Response:
     params = {
         "page": request.GET.get("page", 1),
@@ -370,7 +370,7 @@ def admin_chat_reports_view(request: Request) -> Response:
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_chat_report_update_view(request: Request, report_id: int) -> Response:
     try:
         report = ChatReport.objects.get(id=report_id)

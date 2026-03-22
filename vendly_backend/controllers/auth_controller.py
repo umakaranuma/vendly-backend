@@ -9,6 +9,7 @@ from datetime import timedelta
 import mServices.ResponseService as ResponseService
 from django.conf import settings
 from django.core.cache import cache
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -23,6 +24,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from vendly_backend.activity_log import log_activity
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
 from vendly_backend.permissions import is_admin_user
+from vendly_backend.supabase_media import (
+    MediaValidationError,
+    SupabaseNotConfiguredError,
+    upload_django_file,
+)
 
 from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client
@@ -184,6 +190,7 @@ def _vendor_business_payload(vendor: Vendor) -> dict:
         category_payload = {"id": cat.id, "name": cat.name, "slug": cat.slug}
     return {
         "id": vendor.id,
+        "slug": vendor.slug,
         "business_name": vendor.name,
         "name": vendor.name,
         "city": vendor.city,
@@ -210,13 +217,23 @@ def _auth_session_user_payload(user: CoreUser) -> dict:
         "account_type": account_type,
     }
     role_name = (user.role.name if user.role else "") or ""
-    if role_name.upper() == "VENDOR":
+    upper = role_name.upper()
+    if upper == "VENDOR":
         payload["vendor_person_name"] = (user.first_name or "").strip()
         vendor = getattr(user, "vendor", None)
         if vendor is not None:
             payload["vendor"] = _vendor_business_payload(vendor)
         else:
             payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = None
+    elif upper in {"ADMIN", "SUPER_ADMIN"} or getattr(user, "is_superuser", False):
+        payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = {
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+        }
     else:
         payload["vendor"] = None
         payload["customer"] = {
@@ -224,7 +241,199 @@ def _auth_session_user_payload(user: CoreUser) -> dict:
             "first_name": user.first_name,
             "last_name": user.last_name,
         }
+        payload["admin"] = None
     return payload
+
+
+def _user_status_label(user: CoreUser) -> str:
+    if getattr(user, "status_ref", None):
+        return user.status_ref.name
+    return "active" if user.is_active else "suspended"
+
+
+def _my_profile_core(user: CoreUser) -> dict:
+    """Core user fields for my-profile (includes media and account status label)."""
+    base = _user_payload(user)
+    base["avatar_url"] = user.avatar_url
+    base["cover_url"] = user.cover_url
+    base["bio"] = user.bio
+    base["status"] = _user_status_label(user)
+    return base
+
+
+def _my_profile_payload(user: CoreUser) -> dict:
+    """
+    Full profile for GET /api/auth/my-profile and /api/admin/my-profile (any authenticated role).
+    """
+    core = _my_profile_core(user)
+    account_type = _account_type_from_role(user)
+    payload: dict = {
+        **core,
+        "account_type": account_type,
+    }
+    role_name = (user.role.name if user.role else "") or ""
+    upper = role_name.upper()
+    if upper == "VENDOR":
+        payload["vendor_person_name"] = (user.first_name or "").strip()
+        vendor = getattr(user, "vendor", None)
+        if vendor is not None:
+            payload["vendor"] = _vendor_business_payload(vendor)
+        else:
+            payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = None
+    elif upper in {"ADMIN", "SUPER_ADMIN"} or getattr(user, "is_superuser", False):
+        payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = {
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+        }
+    else:
+        payload["vendor"] = None
+        payload["customer"] = {
+            "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or None,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+        payload["admin"] = None
+    return payload
+
+
+def apply_self_profile_patch(user: CoreUser, data: dict) -> tuple[list[str], dict | None]:
+    """
+    Validates and applies self-service profile fields on `user` (in-place).
+    Returns (update_fields, validation_errors) — errors is None if OK.
+    """
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "first_name": "nullable",
+            "last_name": "nullable",
+            "phone": "nullable",
+            "email": "nullable|email",
+            "avatar_url": "nullable",
+            "cover_url": "nullable",
+            "bio": "nullable",
+        },
+        custom_messages={
+            "email.email": "Email must be a valid address.",
+        },
+    )
+    if errors:
+        return [], errors
+
+    update_fields: list[str] = []
+
+    for field in ["first_name", "last_name", "bio"]:
+        if field in data:
+            setattr(user, field, data.get(field))
+            update_fields.append(field)
+
+    for field in ["avatar_url", "cover_url"]:
+        if field in data:
+            raw = data.get(field)
+            val = (raw or "").strip() or None if isinstance(raw, str) else raw
+            setattr(user, field, val)
+            update_fields.append(field)
+
+    if "phone" in data:
+        phone = (data.get("phone") or "").strip() or None
+        if phone and CoreUser.objects.exclude(pk=user.pk).filter(phone=phone).exists():
+            return [], {"phone": ["Phone already registered."]}
+        user.phone = phone
+        update_fields.append("phone")
+
+    if "email" in data:
+        raw_email = data.get("email")
+        email = (raw_email or "").strip() or None
+        if email:
+            email = CoreUser.objects.normalize_email(email)
+            if CoreUser.objects.exclude(pk=user.pk).filter(email=email).exists():
+                return [], {"email": ["Email already registered."]}
+        user.email = email
+        update_fields.append("email")
+
+    return update_fields, None
+
+
+def _upload_error_response(exc: Exception) -> Response | None:
+    if isinstance(exc, SupabaseNotConfiguredError):
+        return ResponseService.response(
+            "INTERNAL_SERVER_ERROR",
+            {"detail": str(exc)},
+            "Storage is not configured.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if isinstance(exc, MediaValidationError):
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            {"file": [str(exc)]},
+            "Validation error",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
+def _profile_patch_data_dict(request: Request) -> dict:
+    """Form/JSON fields for profile patch, excluding file parts."""
+    raw = request.data
+    skip = frozenset(
+        {"profile_image", "avatar", "cover_image", "cover", "file", "upload_target"}
+    )
+    out: dict = {}
+    try:
+        for key in raw:
+            if key in skip:
+                continue
+            val = raw.get(key)
+            if isinstance(val, UploadedFile):
+                continue
+            out[key] = val
+    except TypeError:
+        out = dict(raw) if raw else {}
+    return out
+
+
+def _process_profile_image_uploads(request: Request, user: CoreUser) -> tuple[dict, Response | None]:
+    """
+    Upload optional profile/cover images from multipart and return URL fields to merge into patch data.
+    File keys: profile_image or avatar, cover_image or cover; legacy: file + upload_target (avatar|cover).
+    """
+    uid = str(user.id)
+    extra: dict = {}
+    profile_file = request.FILES.get("profile_image") or request.FILES.get("avatar")
+    cover_file = request.FILES.get("cover_image") or request.FILES.get("cover")
+    legacy = request.FILES.get("file")
+    target = (request.data.get("upload_target") or request.POST.get("upload_target") or "").strip().lower()
+    if legacy and not profile_file and not cover_file:
+        if target in ("cover", "cover_image"):
+            cover_file = legacy
+        else:
+            profile_file = legacy
+
+    for file_obj, url_field in (
+        (profile_file, "avatar_url"),
+        (cover_file, "cover_url"),
+    ):
+        if not file_obj:
+            continue
+        try:
+            url, _ = upload_django_file("profile", uid, file_obj, allow_video=False)
+            extra[url_field] = url
+        except (SupabaseNotConfiguredError, MediaValidationError) as e:
+            err = _upload_error_response(e)
+            if err:
+                return {}, err
+            raise
+        except Exception as e:
+            return {}, ResponseService.response(
+                "INTERNAL_SERVER_ERROR",
+                {"detail": str(e)},
+                "Upload failed.",
+                status.HTTP_502_BAD_GATEWAY,
+            )
+    return extra, None
 
 
 @api_view(["POST"])
@@ -684,60 +893,42 @@ def confirm_registration_otp(request: Request) -> Response:
     )
 
 
-@api_view(["GET", "PATCH"])
+@api_view(["GET", "PUT", "PATCH"])
 @permission_classes([IsAuthenticated])
-def me_view(request: Request) -> Response:
-    user = request.user
-    assert isinstance(user, CoreUser)
-
-    if request.method == "PATCH":
-        data = request.data
-
-        # Validate updatable profile fields (all optional, but typed)
-        errors = ValidatorService.validate(
-            data,
-            rules={
-                "first_name": "nullable",
-                "last_name": "nullable",
-                "phone": "nullable",
-            },
-            custom_messages={},
-        )
+def my_profile_view(request: Request) -> Response:
+    """
+    Current user profile from JWT (customer, vendor, or admin).
+    GET returns full core user + role-specific block (vendor / customer / admin).
+    PUT/PATCH update profile: same JSON/form fields as before (first_name, last_name, phone, email,
+    avatar_url, cover_url, bio) plus optional multipart files:
+    profile_image or avatar, cover_image or cover (Supabase upload); legacy: file + upload_target
+    (avatar|cover).
+    """
+    user_id = request.user.pk
+    if request.method in ("PUT", "PATCH"):
+        user = CoreUser.objects.get(pk=user_id)
+        uploaded, upload_err = _process_profile_image_uploads(request, user)
+        if upload_err:
+            return upload_err
+        data = _profile_patch_data_dict(request)
+        data.update(uploaded)
+        update_fields, errors = apply_self_profile_patch(user, data)
         if errors:
             return ResponseService.response(
                 "VALIDATION_ERROR",
                 errors,
                 "Validation Error",
             )
-
-        # Only allow some fields to be updated
-        for field in ["first_name", "last_name", "phone"]:
-            if field in data:
-                setattr(user, field, data.get(field))
-        user.save(update_fields=["first_name", "last_name", "phone"])
+        if update_fields:
+            user.save(update_fields=update_fields)
         message = "Profile updated successfully."
     else:
         message = "Profile fetched successfully."
 
-    role = user.role
-    role_payload = None
-    if role:
-        role_payload = {"id": role.id, "name": role.name, "description": role.description}
-
-    user_payload = {
-        "id": user.id,
-        "email": user.email,
-        "phone": user.phone,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_active": user.is_active,
-        "is_verified": user.is_verified,
-        "role": role_payload,
-    }
-
+    user = CoreUser.objects.select_related("role", "status_ref", "vendor", "vendor__category").get(pk=user_id)
     return ResponseService.response(
         "SUCCESS",
-        user_payload,
+        _my_profile_payload(user),
         message,
         status.HTTP_200_OK,
     )

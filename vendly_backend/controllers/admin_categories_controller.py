@@ -11,9 +11,6 @@ from rest_framework.response import Response
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ResponseService import ResponseService
 from vendly_backend.models import Category
-from vendly_backend.permissions import IsAdmin
-
-
 def _category_payload(category: Category) -> dict:
     return {
         "id": category.id,
@@ -27,7 +24,7 @@ def _category_payload(category: Category) -> dict:
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_categories_view(request: Request) -> Response:
     if request.method == "GET":
         try:
@@ -88,7 +85,7 @@ def admin_categories_view(request: Request) -> Response:
 
 
 @api_view(["GET", "PATCH", "DELETE"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_category_detail_view(request: Request, category_id: int) -> Response:
     try:
         category = Category.objects.get(id=category_id)

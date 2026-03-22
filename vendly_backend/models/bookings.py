@@ -6,6 +6,12 @@ from vendly_backend.models.vendors import Vendor, VendorPackage
 
 class Booking(models.Model):
     customer = models.ForeignKey(CoreUser, on_delete=models.CASCADE, related_name="bookings")
+    # User who submitted the booking (customer self-booking, or vendor initiating a request to another vendor).
+    requested_by = models.ForeignKey(
+        CoreUser,
+        on_delete=models.CASCADE,
+        related_name="requested_bookings",
+    )
     vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name="bookings")
     vendor_package = models.ForeignKey(
         VendorPackage,

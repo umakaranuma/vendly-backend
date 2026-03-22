@@ -66,7 +66,11 @@ from vendly_backend.controllers.vendor_controller import (
     vendor_profile_view,
 )
 from vendly_backend.controllers.feed_controller import list_posts, post_like, post_comments, comment_like
-from vendly_backend.controllers.bookings_controller import bookings_list_view, booking_detail_view
+from vendly_backend.controllers.bookings_controller import (
+    booking_detail_view,
+    booking_status_change_view,
+    bookings_list_view,
+)
 from vendly_backend.controllers.reviews_controller import vendor_reviews_view
 from vendly_backend.controllers.messaging_controller import (
     admin_chat_report_update_view,
@@ -143,6 +147,7 @@ urlpatterns = [
 
     # Bookings
     path("api/bookings", bookings_list_view),
+    path("api/bookings/<int:booking_id>/status", booking_status_change_view),
     path("api/bookings/<int:booking_id>", booking_detail_view),
 
     # Reviews

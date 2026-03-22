@@ -4,7 +4,7 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -249,7 +249,10 @@ def _public_vendor_payload(vendor: Vendor) -> dict:
 
 
 def list_public_vendors(request: Request) -> Response:
-    """Paginated list of approved vendors with profile images and related fields (public)."""
+    """Paginated list of approved vendors (public).
+
+    Optional query params: category_id (filter); search or q (name, category name, category slug).
+    """
     try:
         page = int(request.GET.get("page", 1))
         limit = int(request.GET.get("limit", 20))
@@ -265,6 +268,18 @@ def list_public_vendors(request: Request) -> Response:
             )
             .order_by("-created_at")
         )
+
+        raw_category_id = request.GET.get("category_id")
+        if raw_category_id is not None and str(raw_category_id).strip() != "":
+            qs = qs.filter(category_id=int(raw_category_id))
+
+        search_term = (request.GET.get("search") or request.GET.get("q") or "").strip()
+        if search_term:
+            qs = qs.filter(
+                Q(name__icontains=search_term)
+                | Q(category__name__icontains=search_term)
+                | Q(category__slug__icontains=search_term)
+            )
         paginator = Paginator(qs, limit)
         page_obj = paginator.get_page(page)
         data = [_public_vendor_payload(v) for v in page_obj.object_list]

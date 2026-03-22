@@ -21,7 +21,12 @@ class EndpointPermissionMiddleware:
         "api/auth/login": "public",
         "api/categories": "public",
         "api/categories/<int:category_id>": "public",
+        "api/vendors": "public",
+        "api/vendors/<int:vendor_id>": "public",
         "api/vendors/<int:vendor_id>/packages": "public",
+        "api/vendors/<int:vendor_id>/posts": "public",
+        "api/posts": "public",
+        "api/posts/<int:post_id>": "public",
         "api/subscription/plans": "public",
     }
 
@@ -52,9 +57,23 @@ class EndpointPermissionMiddleware:
             permission = self.ENDPOINT_PERMISSIONS.get(resolved_path, "authenticated")
 
             if permission == "public":
-                # Avoid downstream auth failures on public routes with stale/invalid bearer tokens.
-                if "HTTP_AUTHORIZATION" in request.META:
-                    del request.META["HTTP_AUTHORIZATION"]
+                # Optional JWT: anonymous OK; valid Bearer attaches user for admin/vendor actions on the same path.
+                # Invalid/expired tokens are stripped so DRF treats the request as anonymous (no spurious 401).
+                auth_header = request.headers.get("Authorization", None)
+                if auth_header and auth_header.startswith("Bearer "):
+                    try:
+                        raw_token = auth_header.split(" ")[1]
+                        validated_token = self.jwt_auth.get_validated_token(raw_token)
+                        user_id = validated_token.get("user_id")
+                        if user_id:
+                            user = User.objects.filter(id=user_id).first()
+                            if user:
+                                request.user = user
+                            elif "HTTP_AUTHORIZATION" in request.META:
+                                del request.META["HTTP_AUTHORIZATION"]
+                    except (InvalidToken, AuthenticationFailed, IndexError, KeyError, TypeError):
+                        if "HTTP_AUTHORIZATION" in request.META:
+                            del request.META["HTTP_AUTHORIZATION"]
                 return self.get_response(request)
 
             auth_header = request.headers.get("Authorization", None)

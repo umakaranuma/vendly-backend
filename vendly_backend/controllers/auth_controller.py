@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import logging
+import time
 import random
 import re
 from datetime import timedelta
@@ -9,6 +9,7 @@ from datetime import timedelta
 import mServices.ResponseService as ResponseService
 from django.conf import settings
 from django.core.cache import cache
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -23,17 +24,21 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from vendly_backend.activity_log import log_activity
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser, Vendor
 from vendly_backend.permissions import is_admin_user
+from vendly_backend.supabase_media import (
+    MediaValidationError,
+    SupabaseNotConfiguredError,
+    upload_django_file,
+)
 
-try:
-    from pingram import Pingram
-except Exception:  # pragma: no cover - optional dependency at runtime
-    Pingram = None
-
+from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client
 
 logger = logging.getLogger(__name__)
 
 
 OTP_CACHE_PREFIX = "auth:otp"
+# Registration OTP is fixed (SMS disabled). Must match what clients send to confirm-otp.
+STATIC_REGISTRATION_OTP = "111111"
 
 
 def _build_tokens_for_user(user: CoreUser) -> dict:
@@ -74,8 +79,7 @@ def _generate_otp() -> str:
 
 def _normalize_phone_for_sms(phone: str) -> str:
     """
-    Pingram SMS delivery expects a proper mobile destination. Prefer E.164 (e.g. +919876543210).
-    Do not pass the phone as Pingram `to.id` — that field is a user id and can resolve the wrong recipient.
+    Twilio SMS expects E.164 (e.g. +94769114278, +919876543210).
     """
     raw = (phone or "").strip()
     if not raw:
@@ -93,66 +97,51 @@ def _normalize_phone_for_sms(phone: str) -> str:
     return f"+{digits_only}"
 
 
-async def _send_pingram_sms(phone: str, otp_code: str) -> None:
-    if not settings.PINGRAM_API_KEY:
-        raise RuntimeError("PINGRAM_API_KEY is not configured.")
-    if Pingram is None:
-        raise RuntimeError("pingram-python package is not installed.")
+def _send_twilio_sms(phone: str, otp_code: str) -> None:
+    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        raise RuntimeError("TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN are not configured.")
+    if not settings.TWILIO_PHONE_NUMBER:
+        raise RuntimeError("TWILIO_PHONE_NUMBER is not configured.")
 
     to_number = _normalize_phone_for_sms(phone)
     if not to_number:
         raise RuntimeError("Phone number is missing; cannot send OTP SMS.")
 
-    async with Pingram(
-        api_key=settings.PINGRAM_API_KEY,
-        base_url=settings.PINGRAM_BASE_URL,
-    ) as client:
-        payload = {
-            # Only `number` for ad-hoc SMS — `id` is a Pingram user id and can target the wrong contact.
-            "to": {"number": to_number},
-            "forceChannels": ["SMS"],
-            "sms": {
-                "message": f"Your verification code is: {otp_code}. Reply STOP to opt-out.",
-            },
-        }
-        response = None
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            try:
-                response = await client.send(payload)
-                break
-            except Exception as exc:
-                status_code = getattr(exc, "status", None) or getattr(exc, "status_code", None)
-                is_retryable = status_code in {502, 503, 504}
-                if not is_retryable or attempt == max_attempts:
-                    raise
-                logger.warning(
-                    "Pingram temporary failure while sending OTP. attempt=%s status=%s number=%s error=%s",
-                    attempt,
-                    status_code,
-                    to_number,
-                    exc,
-                )
-                await asyncio.sleep(0.8 * attempt)
+    client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    body = f"Your verification code is: {otp_code}. Reply STOP to opt-out."
 
-        if response is None:
-            raise RuntimeError("Pingram SMS response missing after retries.")
-        tracking_id = getattr(response, "tracking_id", None)
-        messages = getattr(response, "messages", None) or []
-        logger.info(
-            "Pingram OTP SMS accepted. number=%s tracking_id=%s messages=%s",
-            to_number,
-            tracking_id,
-            messages,
-        )
-        # Pingram can acknowledge accepted delivery with tracking_id even when messages is empty.
-        # Fail only when both tracking metadata and messages are missing.
-        if not tracking_id and not messages:
-            raise RuntimeError("Pingram did not return tracking_id/messages for OTP SMS.")
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            message = client.messages.create(
+                body=body,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                to=to_number,
+            )
+            logger.info(
+                "Twilio OTP SMS sent. number=%s sid=%s status=%s",
+                to_number,
+                message.sid,
+                message.status,
+            )
+            return
+        except TwilioRestException as exc:
+            status_code = exc.status
+            is_retryable = status_code in {500, 502, 503, 504}
+            if not is_retryable or attempt == max_attempts:
+                raise
+            logger.warning(
+                "Twilio temporary failure while sending OTP. attempt=%s status=%s number=%s error=%s",
+                attempt,
+                status_code,
+                to_number,
+                exc,
+            )
+            time.sleep(0.8 * attempt)
 
 
 def _send_registration_otp(user: CoreUser) -> None:
-    otp_code = _generate_otp()
+    otp_code = STATIC_REGISTRATION_OTP
     expires_in = int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600))
     expires_at = timezone.now() + timedelta(seconds=expires_in)
 
@@ -164,8 +153,6 @@ def _send_registration_otp(user: CoreUser) -> None:
         },
         timeout=expires_in,
     )
-
-    asyncio.run(_send_pingram_sms(user.phone or "", otp_code))
 
 
 def _user_payload(user: CoreUser) -> dict:
@@ -185,6 +172,270 @@ def _user_payload(user: CoreUser) -> dict:
     }
 
 
+def _account_type_from_role(user: CoreUser) -> str:
+    """Lowercase role name for clients (e.g. customer, vendor)."""
+    if user.role and user.role.name:
+        return user.role.name.strip().lower()
+    return "unknown"
+
+
+def _vendor_business_payload(vendor: Vendor) -> dict:
+    """
+    Business profile from `vendors` + `categories`.
+    Business display name is `vendors.name` (maps to API field `business_name`).
+    """
+    cat = vendor.category
+    category_payload = None
+    if cat:
+        category_payload = {"id": cat.id, "name": cat.name, "slug": cat.slug}
+    return {
+        "id": vendor.id,
+        "slug": vendor.slug,
+        "business_name": vendor.name,
+        "name": vendor.name,
+        "city": vendor.city,
+        "bio": vendor.bio,
+        "category_id": vendor.category_id,
+        "category": category_payload,
+        "status": vendor.status,
+        "approved_at": vendor.approved_at.isoformat() if vendor.approved_at else None,
+        "rating": float(vendor.rating) if vendor.rating is not None else 0.0,
+        "review_count": vendor.review_count,
+        "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
+    }
+
+
+def _auth_session_user_payload(user: CoreUser) -> dict:
+    """
+    User object for OTP confirmation and login: base fields, account_type, vendor/customer blocks.
+    Vendor person name: `core_users.first_name` / `last_name`; business: `vendors` row.
+    """
+    base = _user_payload(user)
+    account_type = _account_type_from_role(user)
+    payload: dict = {
+        **base,
+        "account_type": account_type,
+    }
+    role_name = (user.role.name if user.role else "") or ""
+    upper = role_name.upper()
+    if upper == "VENDOR":
+        payload["vendor_person_name"] = (user.first_name or "").strip()
+        vendor = getattr(user, "vendor", None)
+        if vendor is not None:
+            payload["vendor"] = _vendor_business_payload(vendor)
+        else:
+            payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = None
+    elif upper in {"ADMIN", "SUPER_ADMIN"} or getattr(user, "is_superuser", False):
+        payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = {
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+        }
+    else:
+        payload["vendor"] = None
+        payload["customer"] = {
+            "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or None,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+        payload["admin"] = None
+    return payload
+
+
+def _user_status_label(user: CoreUser) -> str:
+    if getattr(user, "status_ref", None):
+        return user.status_ref.name
+    return "active" if user.is_active else "suspended"
+
+
+def _my_profile_core(user: CoreUser) -> dict:
+    """Core user fields for my-profile (includes media and account status label)."""
+    base = _user_payload(user)
+    base["avatar_url"] = user.avatar_url
+    base["cover_url"] = user.cover_url
+    base["bio"] = user.bio
+    base["status"] = _user_status_label(user)
+    return base
+
+
+def _my_profile_payload(user: CoreUser) -> dict:
+    """
+    Full profile for GET /api/auth/my-profile and /api/admin/my-profile (any authenticated role).
+    """
+    core = _my_profile_core(user)
+    account_type = _account_type_from_role(user)
+    payload: dict = {
+        **core,
+        "account_type": account_type,
+    }
+    role_name = (user.role.name if user.role else "") or ""
+    upper = role_name.upper()
+    if upper == "VENDOR":
+        payload["vendor_person_name"] = (user.first_name or "").strip()
+        vendor = getattr(user, "vendor", None)
+        if vendor is not None:
+            payload["vendor"] = _vendor_business_payload(vendor)
+        else:
+            payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = None
+    elif upper in {"ADMIN", "SUPER_ADMIN"} or getattr(user, "is_superuser", False):
+        payload["vendor"] = None
+        payload["customer"] = None
+        payload["admin"] = {
+            "is_staff": user.is_staff,
+            "is_superuser": user.is_superuser,
+        }
+    else:
+        payload["vendor"] = None
+        payload["customer"] = {
+            "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or None,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+        }
+        payload["admin"] = None
+    return payload
+
+
+def apply_self_profile_patch(user: CoreUser, data: dict) -> tuple[list[str], dict | None]:
+    """
+    Validates and applies self-service profile fields on `user` (in-place).
+    Returns (update_fields, validation_errors) — errors is None if OK.
+    """
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "first_name": "nullable",
+            "last_name": "nullable",
+            "phone": "nullable",
+            "email": "nullable|email",
+            "avatar_url": "nullable",
+            "cover_url": "nullable",
+            "bio": "nullable",
+        },
+        custom_messages={
+            "email.email": "Email must be a valid address.",
+        },
+    )
+    if errors:
+        return [], errors
+
+    update_fields: list[str] = []
+
+    for field in ["first_name", "last_name", "bio"]:
+        if field in data:
+            setattr(user, field, data.get(field))
+            update_fields.append(field)
+
+    for field in ["avatar_url", "cover_url"]:
+        if field in data:
+            raw = data.get(field)
+            val = (raw or "").strip() or None if isinstance(raw, str) else raw
+            setattr(user, field, val)
+            update_fields.append(field)
+
+    if "phone" in data:
+        phone = (data.get("phone") or "").strip() or None
+        if phone and CoreUser.objects.exclude(pk=user.pk).filter(phone=phone).exists():
+            return [], {"phone": ["Phone already registered."]}
+        user.phone = phone
+        update_fields.append("phone")
+
+    if "email" in data:
+        raw_email = data.get("email")
+        email = (raw_email or "").strip() or None
+        if email:
+            email = CoreUser.objects.normalize_email(email)
+            if CoreUser.objects.exclude(pk=user.pk).filter(email=email).exists():
+                return [], {"email": ["Email already registered."]}
+        user.email = email
+        update_fields.append("email")
+
+    return update_fields, None
+
+
+def _upload_error_response(exc: Exception) -> Response | None:
+    if isinstance(exc, SupabaseNotConfiguredError):
+        return ResponseService.response(
+            "INTERNAL_SERVER_ERROR",
+            {"detail": str(exc)},
+            "Storage is not configured.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    if isinstance(exc, MediaValidationError):
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            {"file": [str(exc)]},
+            "Validation error",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
+def _profile_patch_data_dict(request: Request) -> dict:
+    """Form/JSON fields for profile patch, excluding file parts."""
+    raw = request.data
+    skip = frozenset(
+        {"profile_image", "avatar", "cover_image", "cover", "file", "upload_target"}
+    )
+    out: dict = {}
+    try:
+        for key in raw:
+            if key in skip:
+                continue
+            val = raw.get(key)
+            if isinstance(val, UploadedFile):
+                continue
+            out[key] = val
+    except TypeError:
+        out = dict(raw) if raw else {}
+    return out
+
+
+def _process_profile_image_uploads(request: Request, user: CoreUser) -> tuple[dict, Response | None]:
+    """
+    Upload optional profile/cover images from multipart and return URL fields to merge into patch data.
+    File keys: profile_image or avatar, cover_image or cover; legacy: file + upload_target (avatar|cover).
+    """
+    uid = str(user.id)
+    extra: dict = {}
+    profile_file = request.FILES.get("profile_image") or request.FILES.get("avatar")
+    cover_file = request.FILES.get("cover_image") or request.FILES.get("cover")
+    legacy = request.FILES.get("file")
+    target = (request.data.get("upload_target") or request.POST.get("upload_target") or "").strip().lower()
+    if legacy and not profile_file and not cover_file:
+        if target in ("cover", "cover_image"):
+            cover_file = legacy
+        else:
+            profile_file = legacy
+
+    for file_obj, url_field in (
+        (profile_file, "avatar_url"),
+        (cover_file, "cover_url"),
+    ):
+        if not file_obj:
+            continue
+        try:
+            url, _ = upload_django_file("profile", uid, file_obj, allow_video=False)
+            extra[url_field] = url
+        except (SupabaseNotConfiguredError, MediaValidationError) as e:
+            err = _upload_error_response(e)
+            if err:
+                return {}, err
+            raise
+        except Exception as e:
+            return {}, ResponseService.response(
+                "INTERNAL_SERVER_ERROR",
+                {"detail": str(e)},
+                "Upload failed.",
+                status.HTTP_502_BAD_GATEWAY,
+            )
+    return extra, None
+
+
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
@@ -200,8 +451,8 @@ def register_customer(request: Request) -> Response:
     errors = ValidatorService.validate(
         _data_with_phone_for_validation(data, phone),
         rules={
-            "email": "required|email",
-            "phone": "required",
+            "email": "nullable|email|unique:core_users,email",
+            "phone": "required|unique:core_users,phone",
             "password": "required|min:6",
             "first_name": "required",
         },
@@ -255,10 +506,10 @@ def register_customer(request: Request) -> Response:
             user.save(update_fields=["status_ref"])
             _send_registration_otp(user)
     except Exception as exc:
-        logger.exception("Failed sending registration OTP for customer: %s", exc)
+        logger.exception("Failed preparing registration OTP for customer: %s", exc)
         return ResponseService.response(
             "SERVER_ERROR",
-            {"detail": "Unable to send OTP right now. Please try again."},
+            {"detail": "Registration could not be completed. Please try again."},
             "Registration failed.",
             status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -276,10 +527,10 @@ def register_customer(request: Request) -> Response:
         "SUCCESS",
         {
             "user": _user_payload(user),
-            "otp_sent": True,
+            "otp_sent": False,
             "otp_expires_in_seconds": int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600)),
         },
-        "Customer registered successfully. Please confirm OTP.",
+        "Customer registered successfully. Confirm with static OTP 111111.",
         status.HTTP_201_CREATED,
     )
 
@@ -304,8 +555,8 @@ def register_vendor(request: Request) -> Response:
     errors = ValidatorService.validate(
         _data_with_phone_for_validation(data, phone),
         rules={
-            "email": "required|email",
-            "phone": "required",
+            "email": "nullable|email|unique:core_users,email",
+            "phone": "required|unique:core_users,phone",
             "password": "required|min:6",
         },
         custom_messages={
@@ -375,10 +626,10 @@ def register_vendor(request: Request) -> Response:
             )
             _send_registration_otp(user)
     except Exception as exc:
-        logger.exception("Failed sending registration OTP for vendor: %s", exc)
+        logger.exception("Failed preparing registration OTP for vendor: %s", exc)
         return ResponseService.response(
             "SERVER_ERROR",
-            {"detail": "Unable to send OTP right now. Please try again."},
+            {"detail": "Registration could not be completed. Please try again."},
             "Registration failed.",
             status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -396,10 +647,10 @@ def register_vendor(request: Request) -> Response:
         "SUCCESS",
         {
             "user": _user_payload(user),
-            "otp_sent": True,
+            "otp_sent": False,
             "otp_expires_in_seconds": int(getattr(settings, "OTP_EXPIRES_IN_SECONDS", 600)),
         },
-        "Vendor registered successfully. Please confirm OTP.",
+        "Vendor registered successfully. Confirm with static OTP 111111.",
         status.HTTP_201_CREATED,
     )
 
@@ -409,24 +660,21 @@ def register_vendor(request: Request) -> Response:
 @permission_classes([AllowAny])
 def login_view(request: Request) -> Response:
     data = request.data
-    email = (data.get("email") or "").strip() or None
-    phone = (data.get("phone") or "").strip() or None
+    phone = _phone_from_registration_data(data)
     password = data.get("password") or ""
 
-    # Validate login input; password required, at least one of email/phone required
+    validation_payload = _data_with_phone_for_validation(data, phone)
     errors = ValidatorService.validate(
-        data,
+        validation_payload,
         rules={
             "password": "required",
+            "phone": "required",
         },
         custom_messages={
             "password.required": "Password is required.",
+            "phone.required": "Phone is required.",
         },
     )
-
-    if not email and not phone:
-        errors = errors or {}
-        errors.setdefault("contact", []).append("Either email or phone is required.")
 
     if errors:
         return ResponseService.response(
@@ -436,17 +684,10 @@ def login_view(request: Request) -> Response:
         )
 
     user: CoreUser | None = None
-
-    if email:
-        try:
-            user = CoreUser.objects.get(email=email)
-        except CoreUser.DoesNotExist:
-            user = None
-    elif phone:
-        try:
-            user = CoreUser.objects.get(phone=phone)
-        except CoreUser.DoesNotExist:
-            user = None
+    try:
+        user = CoreUser.objects.select_related("role", "vendor", "vendor__category").get(phone=phone)
+    except CoreUser.DoesNotExist:
+        user = None
 
     if not user or not user.check_password(password):
         return ResponseService.response(
@@ -483,7 +724,7 @@ def login_view(request: Request) -> Response:
 
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": _user_payload(user)},
+        {"tokens": tokens, "user": _auth_session_user_payload(user)},
         "Login successful.",
         status.HTTP_200_OK,
     )
@@ -494,7 +735,8 @@ def login_view(request: Request) -> Response:
 @permission_classes([AllowAny])
 def admin_login_view(request: Request) -> Response:
     """
-    JWT login for staff dashboard clients. Same credentials shape as /api/auth/login.
+    JWT login for staff dashboard clients. Password required; send email or phone.
+    Public /api/auth/login uses phone + password only.
     Allowed: CoreRole ADMIN/SUPER_ADMIN, or Django superuser (createsuperuser).
     Does not require OTP verification for accounts outside the customer/vendor registration flow.
     """
@@ -605,7 +847,7 @@ def confirm_registration_otp(request: Request) -> Response:
         )
 
     try:
-        user = CoreUser.objects.get(id=user_id)
+        user = CoreUser.objects.select_related("role", "vendor", "vendor__category").get(id=user_id)
     except CoreUser.DoesNotExist:
         return ResponseService.response(
             "NOT_FOUND",
@@ -645,66 +887,48 @@ def confirm_registration_otp(request: Request) -> Response:
     tokens = _build_tokens_for_user(user)
     return ResponseService.response(
         "SUCCESS",
-        {"tokens": tokens, "user": _user_payload(user)},
+        {"tokens": tokens, "user": _auth_session_user_payload(user)},
         "OTP confirmed. Registration completed successfully.",
         status.HTTP_200_OK,
     )
 
 
-@api_view(["GET", "PATCH"])
+@api_view(["GET", "PUT", "PATCH"])
 @permission_classes([IsAuthenticated])
-def me_view(request: Request) -> Response:
-    user = request.user
-    assert isinstance(user, CoreUser)
-
-    if request.method == "PATCH":
-        data = request.data
-
-        # Validate updatable profile fields (all optional, but typed)
-        errors = ValidatorService.validate(
-            data,
-            rules={
-                "first_name": "nullable",
-                "last_name": "nullable",
-                "phone": "nullable",
-            },
-            custom_messages={},
-        )
+def my_profile_view(request: Request) -> Response:
+    """
+    Current user profile from JWT (customer, vendor, or admin).
+    GET returns full core user + role-specific block (vendor / customer / admin).
+    PUT/PATCH update profile: same JSON/form fields as before (first_name, last_name, phone, email,
+    avatar_url, cover_url, bio) plus optional multipart files:
+    profile_image or avatar, cover_image or cover (Supabase upload); legacy: file + upload_target
+    (avatar|cover).
+    """
+    user_id = request.user.pk
+    if request.method in ("PUT", "PATCH"):
+        user = CoreUser.objects.get(pk=user_id)
+        uploaded, upload_err = _process_profile_image_uploads(request, user)
+        if upload_err:
+            return upload_err
+        data = _profile_patch_data_dict(request)
+        data.update(uploaded)
+        update_fields, errors = apply_self_profile_patch(user, data)
         if errors:
             return ResponseService.response(
                 "VALIDATION_ERROR",
                 errors,
                 "Validation Error",
             )
-
-        # Only allow some fields to be updated
-        for field in ["first_name", "last_name", "phone"]:
-            if field in data:
-                setattr(user, field, data.get(field))
-        user.save(update_fields=["first_name", "last_name", "phone"])
+        if update_fields:
+            user.save(update_fields=update_fields)
         message = "Profile updated successfully."
     else:
         message = "Profile fetched successfully."
 
-    role = user.role
-    role_payload = None
-    if role:
-        role_payload = {"id": role.id, "name": role.name, "description": role.description}
-
-    user_payload = {
-        "id": user.id,
-        "email": user.email,
-        "phone": user.phone,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "is_active": user.is_active,
-        "is_verified": user.is_verified,
-        "role": role_payload,
-    }
-
+    user = CoreUser.objects.select_related("role", "status_ref", "vendor", "vendor__category").get(pk=user_id)
     return ResponseService.response(
         "SUCCESS",
-        user_payload,
+        _my_profile_payload(user),
         message,
         status.HTTP_200_OK,
     )

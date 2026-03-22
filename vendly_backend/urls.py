@@ -56,6 +56,7 @@ from vendly_backend.controllers.auth_controller import (
     confirm_registration_otp,
     login_view,
     logout_view,
+    my_profile_view,
     register_customer,
     register_vendor,
 )
@@ -76,12 +77,15 @@ from vendly_backend.controllers.invitations_controller import invitation_templat
 from vendly_backend.controllers.categories_controller import categories_list_view, category_detail_view
 from vendly_backend.controllers.favorites_controller import favorites_list_view, favorite_vendor_view
 from vendly_backend.controllers.vendor_listings_controller import vendor_listings_view, vendor_listing_detail_view
-from vendly_backend.controllers.vendor_posts_controller import vendor_posts_view, vendor_post_detail_view
+from vendly_backend.controllers.vendor_posts_controller import (
+    vendor_post_create_view,
+    vendor_posts_view,
+    vendor_post_detail_view,
+)
 from vendly_backend.controllers.vendor_packages_controller import vendor_packages_view, vendor_package_detail_view, vendor_public_packages_view
 from vendly_backend.controllers.vendor_subscriptions_controller import vendor_subscription_view, subscription_plans_view
 from vendly_backend.controllers.vendor_analytics_controller import vendor_analytics_view
 from vendly_backend.controllers.notifications_controller import notifications_view, read_notification_view, notification_settings_view
-from vendly_backend.controllers.file_upload_controller import file_upload_view
 
 
 def root_health_view(_request):
@@ -99,11 +103,14 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # Auth
     path("api/admin/login", admin_login_view, name="admin_login"),
-    # Both register views create the user then call _send_registration_otp (SMS to phone/mobile).
+    path("api/admin/my-profile", my_profile_view, name="admin_my_profile"),
+    # Both register views create the user then call _send_registration_otp (static OTP in cache; no SMS).
     path("api/auth/register/customer", register_customer, name="register_customer"),
     path("api/auth/register/vendor", register_vendor, name="register_vendor"),
     path("api/auth/confirm-otp", confirm_registration_otp, name="confirm_registration_otp"),
     path("api/auth/login", login_view, name="login"),
+    path("api/auth/my-profile", my_profile_view, name="my_profile"),
+    path("api/users/<int:path_user_id>", users_view, name="users_detail"),
     path("api/users", users_view, name="users"),
     path("api/auth/logout", logout_view, name="logout"),
     
@@ -149,8 +156,9 @@ urlpatterns = [
     path("api/vendor/listings", vendor_listings_view),
     path("api/vendor/listings/<int:listing_id>", vendor_listing_detail_view),
 
-    # Vendor - Posts (self)
+    # Vendor - Posts (self); JSON or multipart (caption + media_file[s])
     path("api/vendor/posts", vendor_posts_view),
+    path("api/posts/create", vendor_post_create_view),
     path("api/vendor/posts/<int:post_id>", vendor_post_detail_view),
 
     # Vendor - Packages & Subs (Public + Self)
@@ -168,9 +176,6 @@ urlpatterns = [
     path("api/users/notifications/<int:notification_id>/read", read_notification_view),
     path("api/users/notification-settings", notification_settings_view),
 
-    # File Upload
-    path("api/upload-file", file_upload_view),
-    
     # Admin: users
     path("api/admin/users/<int:user_id>", retrieve_user, name="admin_retrieve_user"),
     path("api/admin/users/<int:user_id>/update", update_user, name="admin_update_user"),

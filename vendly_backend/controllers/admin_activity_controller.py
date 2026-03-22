@@ -9,9 +9,6 @@ from rest_framework import status
 
 from mServices.ResponseService import ResponseService
 from vendly_backend.models import AuditLog, Notification
-from vendly_backend.permissions import IsAdmin
-
-
 def _paginate(queryset, page: int, limit: int):
     total = queryset.count()
     page = max(page, 1)
@@ -23,7 +20,7 @@ def _paginate(queryset, page: int, limit: int):
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_activity_logs_view(request: Request) -> Response:
     page = int(request.GET.get("page", 1))
     limit = int(request.GET.get("limit", 20))
@@ -82,7 +79,7 @@ def admin_activity_logs_view(request: Request) -> Response:
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_notifications_activity_view(request: Request) -> Response:
     page = int(request.GET.get("page", 1))
     limit = int(request.GET.get("limit", 20))
@@ -130,7 +127,7 @@ def admin_notifications_activity_view(request: Request) -> Response:
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_notification_activity_update_view(request: Request, notification_id: int) -> Response:
     read = request.data.get("read")  # boolean
     if read is None:

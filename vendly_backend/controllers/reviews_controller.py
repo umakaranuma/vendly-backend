@@ -49,9 +49,6 @@ def vendor_reviews_view(request: Request, vendor_id: int) -> Response:
         except Booking.DoesNotExist:
             return ResponseService.response("NOT_FOUND", {"detail": "Booking not found."}, "Validation error", status.HTTP_404_NOT_FOUND)
             
-        if booking.customer_id != request.user.id:
-            return ResponseService.response("FORBIDDEN", {"detail": "You do not own this booking."}, "Validation error", status.HTTP_403_FORBIDDEN)
-            
         if booking.vendor_id != vendor.id:
             return ResponseService.response("BAD_REQUEST", {"detail": "Booking vendor mismatch."}, "Validation error", status.HTTP_400_BAD_REQUEST)
             

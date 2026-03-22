@@ -12,9 +12,6 @@ from rest_framework import status
 
 from mServices.ResponseService import ResponseService
 from vendly_backend.models import Booking, Category, CoreUser, Vendor
-from vendly_backend.permissions import IsAdmin
-
-
 def _last_month_range():
     now = timezone.now()
     first_day_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -24,7 +21,7 @@ def _last_month_range():
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_dashboard_summary_view(request: Request) -> Response:
     last_month_start, last_month_end = _last_month_range()
 
@@ -82,7 +79,7 @@ def admin_dashboard_summary_view(request: Request) -> Response:
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_best_performers_view(request: Request) -> Response:
     """
     Vendor-only leaderboard based on:

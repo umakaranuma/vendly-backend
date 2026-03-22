@@ -7,17 +7,10 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import UserFavoriteVendor, Vendor
-from vendly_backend.permissions import is_admin_user
 
 
 def _get_target_user_id(request: Request):
-    """
-    Resolve which user's favorites to return.
-    - Non-admin: can only access their own data.
-    - Admin: can access any user via `?id=<user_id>`.
-    """
-    is_admin = is_admin_user(request.user)
-
+    """Resolve which user's favorites to return via optional `?id=` (defaults to the authenticated user)."""
     user_id = request.GET.get("id")
     if user_id is None:
         return request.user.id, None
@@ -30,14 +23,6 @@ def _get_target_user_id(request: Request):
             {"id": ["Invalid id."]},
             "Validation Error",
             status.HTTP_400_BAD_REQUEST,
-        )
-
-    if not is_admin and target_user_id != request.user.id:
-        return 0, ResponseService.response(
-            "FORBIDDEN",
-            {},
-            "You are not allowed to access this user's favorites.",
-            status.HTTP_403_FORBIDDEN,
         )
 
     return target_user_id, None

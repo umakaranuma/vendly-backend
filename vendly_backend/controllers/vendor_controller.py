@@ -8,11 +8,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from vendly_backend.models import Vendor
-from vendly_backend.permissions import IsVendor
 
 
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAuthenticated, IsVendor])
+@permission_classes([IsAuthenticated])
 def vendor_profile_view(request: Request) -> Response:
     user = request.user
     try:

@@ -9,10 +9,8 @@ from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import VendorSubscription
 
-from vendly_backend.permissions import IsVendor
-
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsVendor])
+@permission_classes([IsAuthenticated])
 def vendor_subscription_view(request: Request) -> Response:
     vendor = request.user.vendor
     

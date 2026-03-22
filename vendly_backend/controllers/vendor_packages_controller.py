@@ -7,8 +7,6 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import VendorPackage, Vendor
-from vendly_backend.permissions import IsVendor
-
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def vendor_public_packages_view(request: Request, vendor_id: int) -> Response:
@@ -32,7 +30,7 @@ def vendor_public_packages_view(request: Request, vendor_id: int) -> Response:
         return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
 @api_view(["GET", "POST"])
-@permission_classes([IsAuthenticated, IsVendor])
+@permission_classes([IsAuthenticated])
 def vendor_packages_view(request: Request) -> Response:
     vendor = request.user.vendor
     
@@ -88,7 +86,7 @@ def vendor_packages_view(request: Request) -> Response:
         return ResponseService.response("SUCCESS", payload, "Package created successfully.", status.HTTP_201_CREATED)
 
 @api_view(["PUT", "DELETE"])
-@permission_classes([IsAuthenticated, IsVendor])
+@permission_classes([IsAuthenticated])
 def vendor_package_detail_view(request: Request, package_id: int) -> Response:
     try:
         package = VendorPackage.objects.get(id=package_id, vendor=request.user.vendor)

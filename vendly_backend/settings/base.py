@@ -112,7 +112,26 @@ SIMPLE_JWT = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-PINGRAM_API_KEY = os.getenv("PINGRAM_API_KEY", "")
-PINGRAM_BASE_URL = os.getenv("PINGRAM_BASE_URL", "https://api.pingram.io")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 OTP_EXPIRES_IN_SECONDS = int(os.getenv("OTP_EXPIRES_IN_SECONDS", "600"))
+
+# Supabase Storage (backend-only — never expose keys to Flutter/clients)
+# Preferred .env (docs): SUPABASE_URL, SUPABASE_SECRET_KEY, SUPABASE_BUCKET
+# Legacy aliases still work: SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_SERVICE_ROLE_KEY = (
+    os.getenv("SUPABASE_SECRET_KEY", "").strip()
+    or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+)
+_bucket = (
+    os.getenv("SUPABASE_BUCKET", "").strip()
+    or os.getenv("SUPABASE_STORAGE_BUCKET", "").strip()
+)
+SUPABASE_STORAGE_BUCKET = _bucket or "media"
+
+# Allow large multipart uploads (e.g. 50MB video posts)
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(52 * 1024 * 1024)))
+FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(52 * 1024 * 1024)))
 

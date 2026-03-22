@@ -11,9 +11,6 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from vendly_backend.activity_log import log_activity
 from vendly_backend.models import Booking
-from vendly_backend.permissions import IsAdmin
-
-
 def _paginate(queryset, page: int, limit: int):
     total = queryset.count()
     page = max(page, 1)
@@ -25,7 +22,7 @@ def _paginate(queryset, page: int, limit: int):
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_bookings_list_view(request: Request) -> Response:
     page = int(request.GET.get("page", 1))
     limit = int(request.GET.get("limit", 20))
@@ -76,7 +73,7 @@ def admin_bookings_list_view(request: Request) -> Response:
 
 
 @api_view(["PATCH"])
-@permission_classes([IsAuthenticated, IsAdmin])
+@permission_classes([IsAuthenticated])
 def admin_booking_update_view(request: Request, booking_id: int) -> Response:
     new_status = request.data.get("status")
     allowed_statuses = {"pending", "confirmed", "completed", "cancelled"}

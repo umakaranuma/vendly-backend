@@ -143,7 +143,6 @@ urlpatterns = [
 
     # Bookings
     path("api/bookings", bookings_list_view),
-    path("api/booking", bookings_list_view),  # backward-compatible alias
     path("api/bookings/<int:booking_id>", booking_detail_view),
 
     # Reviews

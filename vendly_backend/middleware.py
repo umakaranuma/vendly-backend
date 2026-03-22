@@ -25,6 +25,7 @@ class EndpointPermissionMiddleware:
         "api/vendors/<int:vendor_id>": "public",
         "api/vendors/<int:vendor_id>/packages": "public",
         "api/vendors/<int:vendor_id>/posts": "public",
+        "api/vendors/<int:vendor_id>/reviews": "public",
         "api/posts": "public",
         "api/posts/<int:post_id>": "public",
         "api/subscription/plans": "public",

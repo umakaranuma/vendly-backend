@@ -1,11 +1,11 @@
+from django.core.paginator import Paginator
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework import status
 
 from mServices.ResponseService import ResponseService
-from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import VendorReview, Vendor, Booking
 
 @api_view(["GET", "POST"])
@@ -20,15 +20,45 @@ def vendor_reviews_view(request: Request, vendor_id: int) -> Response:
         try:
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 20))
-            
-            query = (
-                QueryBuilderService("vendor_reviews")
-                .select("vendor_reviews.id", "vendor_reviews.rating", "vendor_reviews.comment", "vendor_reviews.created_at", "core_users.first_name", "core_users.last_name", "core_users.avatar_url")
-                .leftJoin("core_users", "core_users.id", "vendor_reviews.reviewer_id")
-                .apply_conditions(f'{{"vendor_id": {vendor.id}}}', ["vendor_id"], "", [])
-                .paginate(page, limit, ["vendor_reviews.created_at"], "vendor_reviews.created_at", "desc")
+            if page < 1 or limit < 1:
+                raise ValueError("Invalid pagination")
+
+            qs = (
+                VendorReview.objects.filter(vendor_id=vendor.id)
+                .select_related("reviewer")
+                .order_by("-created_at")
             )
+            paginator = Paginator(qs, limit)
+            page_obj = paginator.get_page(page)
+            rows = []
+            for r in page_obj.object_list:
+                u = r.reviewer
+                rows.append(
+                    {
+                        "id": r.id,
+                        "rating": float(r.rating) if r.rating is not None else None,
+                        "comment": r.comment,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "first_name": u.first_name,
+                        "last_name": u.last_name,
+                        "avatar_url": u.avatar_url,
+                    }
+                )
+            query = {
+                "total_records": paginator.count,
+                "per_page": limit,
+                "current_page": page_obj.number,
+                "last_page": paginator.num_pages or 1,
+                "data": rows,
+            }
             return ResponseService.response("SUCCESS", query, "Reviews retrieved successfully.")
+        except ValueError:
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                {"pagination": ["Invalid parameters"]},
+                "Invalid Request",
+                status.HTTP_400_BAD_REQUEST,
+            )
         except Exception as e:
             return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 

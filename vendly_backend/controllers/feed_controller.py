@@ -11,7 +11,7 @@ from mServices.ResponseService import ResponseService
 from vendly_backend.vendor_ratings import feed_post_vendor_rating_and_count
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import (
-    Feed, FeedLike, FeedDislike, FeedMedia, FeedComment, CommentLike, VendorFollower, Vendor
+    Feed, FeedLike, FeedMedia, FeedComment, CommentLike, VendorFollower, Vendor
 )
 from vendly_backend.permissions import is_admin_user
 
@@ -39,12 +39,10 @@ def _serialize_feed_post(feed: Feed) -> dict:
         "vendor_id": vendor.id,
         "caption": feed.caption,
         "like_count": feed.like_count,
-        "dislike_count": feed.dislike_count,
         "comment_count": feed.comment_count,
         "created_at": feed.created_at.isoformat() if feed.created_at else None,
         "updated_at": feed.updated_at.isoformat() if feed.updated_at else None,
         "is_liked_by_me": bool(getattr(feed, "is_liked_by_me", False)),
-        "is_disliked_by_me": bool(getattr(feed, "is_disliked_by_me", False)),
         "is_followed_by_me": bool(getattr(feed, "is_followed_by_me", False)),
         "media": media_list,
         "images": images,
@@ -106,9 +104,6 @@ def list_posts_impl(request: Request, vendor_id: int | None = None) -> Response:
                 is_liked_by_me=Exists(
                     FeedLike.objects.filter(feed_id=OuterRef("pk"), user_id=user.id)
                 ),
-                is_disliked_by_me=Exists(
-                    FeedDislike.objects.filter(feed_id=OuterRef("pk"), user_id=user.id)
-                ),
                 is_followed_by_me=Exists(
                     VendorFollower.objects.filter(vendor_id=OuterRef("vendor_id"), user_id=user.id)
                 )
@@ -116,7 +111,6 @@ def list_posts_impl(request: Request, vendor_id: int | None = None) -> Response:
         else:
             base = base.annotate(
                 is_liked_by_me=Value(False, output_field=BooleanField()),
-                is_disliked_by_me=Value(False, output_field=BooleanField()),
                 is_followed_by_me=Value(False, output_field=BooleanField())
             )
         if vendor_id is not None:
@@ -162,9 +156,6 @@ def retrieve_feed_post_impl(request: Request, feed_id: int) -> Response:
                     is_liked_by_me=Exists(
                         FeedLike.objects.filter(feed_id=OuterRef("pk"), user_id=user.id)
                     ),
-                    is_disliked_by_me=Exists(
-                        FeedDislike.objects.filter(feed_id=OuterRef("pk"), user_id=user.id)
-                    ),
                     is_followed_by_me=Exists(
                         VendorFollower.objects.filter(vendor_id=OuterRef("vendor_id"), user_id=user.id)
                     )
@@ -172,7 +163,6 @@ def retrieve_feed_post_impl(request: Request, feed_id: int) -> Response:
             else:
                 qs = qs.annotate(
                     is_liked_by_me=Value(False, output_field=BooleanField()),
-                    is_disliked_by_me=Value(False, output_field=BooleanField()),
                     is_followed_by_me=Value(False, output_field=BooleanField())
                 )
             feed = qs.get(pk=feed_id)
@@ -192,67 +182,27 @@ def retrieve_feed_post_impl(request: Request, feed_id: int) -> Response:
 def list_posts(request: Request) -> Response:
     return list_posts_impl(request)
 
-@api_view(["POST", "DELETE"])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def post_like(request: Request, post_id: int) -> Response:
+def toggle_feed_like(request: Request, post_id: int) -> Response:
     try:
         feed = Feed.objects.get(id=post_id)
     except Feed.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Feed not found.", status.HTTP_404_NOT_FOUND)
 
     user = request.user
-    if request.method == "POST":
-        # Remove dislike if it exists
-        FeedDislike.objects.filter(feed=feed, user=user).delete()
-        
+    with transaction.atomic():
         like, created = FeedLike.objects.get_or_create(feed=feed, user=user)
-        if created:
-            feed.like_count += 1
-            # Recalculate counts to be safe
-            feed.dislike_count = feed.dislikes.count()
-            feed.save()
-        return ResponseService.response("SUCCESS", {"liked": True, "like_count": feed.like_count, "dislike_count": feed.dislike_count}, "Feed liked.")
-    
-    elif request.method == "DELETE":
-        try:
-            like = FeedLike.objects.get(feed=feed, user=user)
+        if not created:
             like.delete()
             feed.like_count = max(0, feed.like_count - 1)
-            feed.save(update_fields=["like_count"])
-        except FeedLike.DoesNotExist:
-            pass
-        return ResponseService.response("SUCCESS", {}, "Feed unliked.", status.HTTP_204_NO_CONTENT)
-
-@api_view(["POST", "DELETE"])
-@permission_classes([IsAuthenticated])
-def post_dislike(request: Request, post_id: int) -> Response:
-    try:
-        feed = Feed.objects.get(id=post_id)
-    except Feed.DoesNotExist:
-        return ResponseService.response("NOT_FOUND", {}, "Feed not found.", status.HTTP_404_NOT_FOUND)
-
-    user = request.user
-    if request.method == "POST":
-        # Remove like if it exists
-        FeedLike.objects.filter(feed=feed, user=user).delete()
-        
-        dislike, created = FeedDislike.objects.get_or_create(feed=feed, user=user)
-        if created:
-            feed.dislike_count += 1
-            # Recalculate counts to be safe
-            feed.like_count = feed.likes.count()
-            feed.save()
-        return ResponseService.response("SUCCESS", {"disliked": True, "like_count": feed.like_count, "dislike_count": feed.dislike_count}, "Feed disliked.")
+            msg = "Feed unliked."
+        else:
+            feed.like_count += 1
+            msg = "Feed liked."
+        feed.save(update_fields=["like_count"])
     
-    elif request.method == "DELETE":
-        try:
-            dislike = FeedDislike.objects.get(feed=feed, user=user)
-            dislike.delete()
-            feed.dislike_count = max(0, feed.dislike_count - 1)
-            feed.save(update_fields=["dislike_count"])
-        except FeedDislike.DoesNotExist:
-            pass
-        return ResponseService.response("SUCCESS", {}, "Feed undisliked.", status.HTTP_204_NO_CONTENT)
+    return ResponseService.response("SUCCESS", {"like_count": feed.like_count, "is_liked": created}, msg)
 
 @api_view(["GET", "POST", "PUT", "DELETE"])
 @permission_classes([IsAuthenticated])

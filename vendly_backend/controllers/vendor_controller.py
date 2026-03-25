@@ -15,7 +15,7 @@ import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 
-from vendly_backend.models import Vendor
+from vendly_backend.models import Vendor, VendorFollower
 from vendly_backend.permissions import is_admin_user
 from vendly_backend.vendor_ratings import public_vendor_rating_and_count
 
@@ -215,11 +215,19 @@ def _public_vendor_status_display(vendor: Vendor) -> str:
     return vendor.status
 
 
-def _public_vendor_payload(vendor: Vendor) -> dict:
+def _public_vendor_payload(vendor: Vendor, request=None) -> dict:
     """Vendor row plus linked user profile (avatar, cover, names) for public API responses."""
     u = vendor.user
     cat = vendor.category
     rating, review_count = public_vendor_rating_and_count(vendor)
+
+    # Determine if the requesting user follows this vendor
+    is_followed_by_me = False
+    if request and hasattr(request, 'user') and request.user.is_authenticated:
+        is_followed_by_me = VendorFollower.objects.filter(
+            vendor=vendor, user=request.user
+        ).exists()
+
     return {
         "id": vendor.id,
         "name": vendor.name,
@@ -237,6 +245,8 @@ def _public_vendor_payload(vendor: Vendor) -> dict:
         "bio": vendor.bio,
         "status": _public_vendor_status_display(vendor),
         "created_at": vendor.created_at.isoformat() if vendor.created_at else None,
+        "followers_count": vendor.followers_count if hasattr(vendor, 'followers_count') else 0,
+        "is_followed_by_me": is_followed_by_me,
         "user": {
             "id": u.id,
             "first_name": u.first_name,
@@ -282,7 +292,7 @@ def list_public_vendors(request: Request) -> Response:
             )
         paginator = Paginator(qs, limit)
         page_obj = paginator.get_page(page)
-        data = [_public_vendor_payload(v) for v in page_obj.object_list]
+        data = [_public_vendor_payload(v, request) for v in page_obj.object_list]
         result = {
             "total_records": paginator.count,
             "per_page": limit,
@@ -328,7 +338,7 @@ def retrieve_public_vendor(request: Request, vendor_id: int) -> Response:
             )
         return ResponseService.response(
             "SUCCESS",
-            _public_vendor_payload(vendor),
+            _public_vendor_payload(vendor, request),
             "Vendor fetched successfully.",
             status.HTTP_200_OK,
         )

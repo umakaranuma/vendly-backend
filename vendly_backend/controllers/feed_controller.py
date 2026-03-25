@@ -229,7 +229,7 @@ def post_comments(request: Request, post_id: int) -> Response:
             return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
     elif request.method == "POST":
-        text = request.data.get("text")
+        text = request.data.get("text") or request.data.get("comment")
         parent_id = request.data.get("parent_id")
         
         if not text:
@@ -313,7 +313,7 @@ def post_comments(request: Request, post_id: int) -> Response:
 
         return ResponseService.response("SUCCESS", {}, "Comment deleted.", status.HTTP_204_NO_CONTENT)
 
-@api_view(["POST", "DELETE"])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def vendor_follow(request: Request, vendor_id: int) -> Response:
     try:
@@ -322,22 +322,28 @@ def vendor_follow(request: Request, vendor_id: int) -> Response:
         return ResponseService.response("NOT_FOUND", {}, "Vendor not found.", status.HTTP_404_NOT_FOUND)
 
     user = request.user
-    if request.method == "POST":
-        follow, created = VendorFollower.objects.get_or_create(vendor=vendor, user=user)
-        if created:
-            vendor.followers_count += 1
-            vendor.save(update_fields=["followers_count"])
-        return ResponseService.response("SUCCESS", {"followed": True, "followers_count": vendor.followers_count}, "Vendor followed.")
-    
-    elif request.method == "DELETE":
-        try:
-            follow = VendorFollower.objects.get(vendor=vendor, user=user)
-            follow.delete()
+    with transaction.atomic():
+        existing = VendorFollower.objects.filter(vendor=vendor, user=user).first()
+        if existing:
+            # Already following → unfollow
+            existing.delete()
             vendor.followers_count = max(0, vendor.followers_count - 1)
             vendor.save(update_fields=["followers_count"])
-        except VendorFollower.DoesNotExist:
-            pass
-        return ResponseService.response("SUCCESS", {"followers_count": vendor.followers_count}, "Vendor unfollowed.", status.HTTP_200_OK) # Changed to 200 to return data
+            is_followed = False
+            msg = "Vendor unfollowed."
+        else:
+            # Not following → follow
+            VendorFollower.objects.create(vendor=vendor, user=user)
+            vendor.followers_count += 1
+            vendor.save(update_fields=["followers_count"])
+            is_followed = True
+            msg = "Vendor followed."
+
+    return ResponseService.response(
+        "SUCCESS",
+        {"is_followed": is_followed, "followers_count": vendor.followers_count},
+        msg,
+    )
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])

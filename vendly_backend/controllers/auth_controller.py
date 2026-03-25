@@ -596,9 +596,9 @@ def register_vendor(request: Request) -> Response:
 
     try:
         with transaction.atomic():
-            pending_status, _ = CoreStatus.objects.get_or_create(
-                status_type="vendor_pending",
-                defaults={"entity_type": "vendor", "name": "pending", "sort_order": 10},
+            approved_status, _ = CoreStatus.objects.get_or_create(
+                status_type="vendor_approved",
+                defaults={"entity_type": "vendor", "name": "approved", "sort_order": 20},
             )
 
             user = CoreUser.objects.create_user(
@@ -621,8 +621,8 @@ def register_vendor(request: Request) -> Response:
                 user=user,
                 name=name,
                 city=city,
-                status="pending",
-                status_ref=pending_status,
+                status="approved",
+                status_ref=approved_status,
             )
             _send_registration_otp(user)
     except Exception as exc:

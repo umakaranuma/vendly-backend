@@ -148,7 +148,7 @@ def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
                 media_list = []
                 for f in files:
                     try:
-                        url, is_video = upload_django_file("feeds", owner_key, f)
+                        url, is_video = upload_django_file("posts", owner_key, f)
                     except SupabaseNotConfiguredError:
                         return ResponseService.response(
                             "INTERNAL_SERVER_ERROR",
@@ -337,7 +337,7 @@ def _create_post_from_multipart(request: Request, vendor) -> Response:
     owner_key = str(vendor.id)
     for f in files:
         try:
-            url, is_video = upload_django_file("feeds", owner_key, f)
+            url, is_video = upload_django_file("posts", owner_key, f)
         except SupabaseNotConfiguredError:
             return ResponseService.response(
                 "INTERNAL_SERVER_ERROR",

@@ -13,6 +13,7 @@ ALLOWED_HOSTS: list[str] = ["*"]
 # Comma-separated list, e.g. "http://localhost:3000,https://app.example.com"
 _cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+CORS_ALLOW_ALL_ORIGINS = DEBUG # Add this to allow all origins during local development
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -66,7 +67,11 @@ DATABASES = {
         'USER': os.getenv("DB_USERNAME"),
         'PASSWORD': os.getenv("DB_PASSWORD"),
         'HOST': os.getenv("DB_HOST"),
-        'PORT': os.getenv("DB_PORT"), 
+        'PORT': os.getenv("DB_PORT"),
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES', names 'utf8mb4' COLLATE 'utf8mb4_unicode_ci'",
+        },
     }
 }
 

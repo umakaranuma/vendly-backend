@@ -25,14 +25,14 @@ from vendly_backend.vendor_ratings import sync_vendor_rating_from_reviews
 from vendly_backend.models import (
     Booking,
     Category,
-    Comment,
+    FeedComment,
     CoreRole,
     CoreStatus,
     CoreUser,
     Listing,
-    Post,
-    PostLike,
-    PostMedia,
+    Feed,
+    FeedLike,
+    FeedMedia,
     SubscriptionPlan,
     UserFavoriteVendor,
     Vendor,
@@ -338,10 +338,10 @@ class Command(BaseCommand):
             ]
             for vendor, row, cap in zip(vendors, VENDOR_SEEDS, post_captions, strict=True):
                 slug = row["slug"]
-                if not vendor.posts.exists():
-                    post = Post.objects.create(vendor=vendor, caption=cap, like_count=2, comment_count=1)
-                    PostMedia.objects.create(
-                        post=post,
+                if not vendor.feeds.exists():
+                    feed = Feed.objects.create(vendor=vendor, caption=cap, like_count=2, comment_count=1)
+                    FeedMedia.objects.create(
+                        feed=feed,
                         url=f"https://picsum.photos/seed/{slug}-post/1080/1080",
                         is_video=False,
                         sort_order=0,
@@ -350,14 +350,14 @@ class Command(BaseCommand):
             # Likes & comments (first customer interacts with first post of each vendor)
             customer_a = customers[0]
             for vendor in vendors:
-                post = vendor.posts.order_by("id").first()
-                if post:
-                    PostLike.objects.get_or_create(post=post, user=customer_a)
-                    if not post.comments.filter(user=customer_a).exists():
-                        Comment.objects.create(
-                            post=post,
-                            user=customer_a,
-                            text="This looks amazing — saving for our date!",
+                feed = vendor.feeds.order_by("id").first()
+                if feed:
+                    FeedLike.objects.get_or_create(feed=feed, user=customer_a)
+                    if not feed.comments.filter(created_by=customer_a).exists():
+                        FeedComment.objects.create(
+                            feed=feed,
+                            created_by=customer_a,
+                            comment="This looks amazing — saving for our date!",
                         )
 
             # Favorites

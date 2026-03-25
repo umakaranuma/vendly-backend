@@ -56,12 +56,12 @@ def public_vendor_rating_and_count(vendor) -> tuple[float, int]:
     return (float(r) if r is not None else 0.0, int(vendor.review_count or 0))
 
 
-def feed_post_vendor_rating_and_count(post) -> tuple[float, int]:
-    """Same as public vendor stats, for feed rows annotated on ``Post``."""
-    cnt = getattr(post, "_vendor_reviews_count", None)
-    avg = getattr(post, "_vendor_reviews_avg", None)
+def feed_post_vendor_rating_and_count(feed) -> tuple[float, int]:
+    """Same as public vendor stats, for feed rows annotated on ``Feed``."""
+    cnt = getattr(feed, "_vendor_reviews_count", None)
+    avg = getattr(feed, "_vendor_reviews_avg", None)
     if cnt is not None:
         return (float(avg) if avg is not None else 0.0, int(cnt))
-    v = post.vendor
+    v = feed.vendor
     r = v.rating
     return (float(r) if r is not None else 0.0, int(v.review_count or 0))

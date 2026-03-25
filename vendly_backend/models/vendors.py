@@ -29,6 +29,7 @@ class Vendor(models.Model):
     review_count = models.IntegerField(default=0)
     price_from = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     bio = models.TextField(null=True, blank=True)
+    followers_count = models.IntegerField(default=0)
     
     STATUS_CHOICES = (
         ('pending', 'Pending'),

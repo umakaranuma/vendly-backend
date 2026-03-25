@@ -2,7 +2,7 @@ from .example import ExampleItem
 from .core import CoreRole, CoreUser, VendorProfile, CoreStatus
 from .users import Session, Notification, UserNotificationSetting
 from .vendors import Category, Vendor, VendorGallery, Listing, SubscriptionPlan, VendorPackage, VendorSubscription
-from .feed import Post, PostMedia, PostLike, Comment, CommentLike
+from .feed import Feed, FeedMedia, FeedLike, FeedDislike, FeedComment, CommentLike
 from .bookings import Booking, VendorReview
 from .messaging import (
     ChatReport,
@@ -13,4 +13,4 @@ from .messaging import (
     MessageReadReceipt,
 )
 from .invitations import InvitationTemplate, Invitation, InvitationTemplateType
-from .interactions import UserFavoriteVendor, VendorView, AuditLog
+from .interactions import UserFavoriteVendor, VendorView, AuditLog, VendorFollower

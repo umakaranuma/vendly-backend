@@ -36,3 +36,14 @@ class AuditLog(models.Model):
     class Meta:
         db_table = "audit_log"
         app_label = "vendly_backend"
+
+
+class VendorFollower(models.Model):
+    user = models.ForeignKey(CoreUser, on_delete=models.CASCADE, related_name="followed_vendors")
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name="followers")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vendor_followers"
+        app_label = "vendly_backend"
+        unique_together = ("user", "vendor")

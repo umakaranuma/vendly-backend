@@ -6,7 +6,7 @@ from rest_framework import status
 from django.db.models import Sum
 
 from mServices.ResponseService import ResponseService
-from vendly_backend.models import Booking, VendorView, PostLike, CommentLike
+from vendly_backend.models import Booking, VendorView, FeedLike, FeedComment
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def vendor_analytics_view(request: Request) -> Response:
@@ -18,10 +18,10 @@ def vendor_analytics_view(request: Request) -> Response:
         # Note: in a real implementation we would filter by date_from and date_to
         views_count = VendorView.objects.filter(vendor=vendor).count()
         
-        # Approximate likes from posts + comments
-        post_likes = PostLike.objects.filter(post__vendor=vendor).count()
-        # comment_likes = CommentLike.objects.filter(comment__post__vendor=vendor).count()
-        likes_count = post_likes # + comment_likes
+        # Approximate likes from feeds + comments
+        feed_likes = FeedLike.objects.filter(feed__vendor=vendor).count()
+        # comment_likes = FeedComment.objects.filter(comment__feed__vendor=vendor).count()
+        likes_count = feed_likes # + comment_likes
         
         bookings_count = Booking.objects.filter(vendor=vendor).count()
         

@@ -14,7 +14,7 @@ import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 from vendly_backend.controllers.feed_controller import list_posts_impl, retrieve_feed_post_impl
-from vendly_backend.models import Post, PostMedia, Vendor
+from vendly_backend.models import Feed, FeedMedia, Vendor
 from vendly_backend.permissions import is_admin_user
 from vendly_backend.supabase_media import (
     MediaValidationError,
@@ -31,7 +31,7 @@ def _require_vendor(request: Request):
     except Vendor.DoesNotExist:
         return None, ResponseService.response(
             "FORBIDDEN",
-            {"detail": "Only vendor accounts can create or manage feed posts."},
+            {"detail": "Only vendor accounts can create or manage feeds."},
             "Vendor profile required.",
             status.HTTP_403_FORBIDDEN,
         )
@@ -71,9 +71,9 @@ def list_vendor_posts(request: Request, vendor) -> Response:
                 filters["id"] = int(extra["id"])
 
         sort_map = {
-            "created_at": "posts.created_at",
-            "like_count": "posts.like_count",
-            "comment_count": "posts.comment_count",
+            "created_at": "feeds.created_at",
+            "like_count": "feeds.like_count",
+            "comment_count": "feeds.comment_count",
         }
         if sort_by not in sort_map:
             raise ValueError("Invalid sort_by")
@@ -85,23 +85,24 @@ def list_vendor_posts(request: Request, vendor) -> Response:
         filter_keys = list(filters.keys())
 
         query = (
-            QueryBuilderService("posts")
+            QueryBuilderService("feeds")
             .select(
-                "posts.id",
-                "posts.caption",
-                "posts.like_count",
-                "posts.comment_count",
-                "posts.created_at",
+                "feeds.id",
+                "feeds.caption",
+                "feeds.like_count",
+                "feeds.dislike_count",
+                "feeds.comment_count",
+                "feeds.created_at",
             )
             .apply_conditions(
                 filter_json,
                 filter_keys,
                 search_string,
-                ["posts.caption"],
+                ["feeds.caption"],
             )
             .paginate(page, limit, [sort_col], sort_col, sort_dir)
         )
-        return ResponseService.response("SUCCESS", query, "Posts retrieved successfully.")
+        return ResponseService.response("SUCCESS", query, "Feeds retrieved successfully.")
     except ValidationError as e:
         return ResponseService.response(
             "VALIDATION_ERROR",
@@ -126,11 +127,11 @@ def retrieve_post(request: Request, post_id: int) -> Response:
 
 def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
     try:
-        post = Post.objects.get(id=post_id, vendor=vendor)
+        feed = Feed.objects.get(id=post_id, vendor=vendor)
         if _is_multipart(request):
             caption = request.POST.get("caption")
             if caption is not None:
-                post.caption = (caption or "").strip()
+                feed.caption = (caption or "").strip()
             files = []
             files.extend(request.FILES.getlist("media_file"))
             if not files:
@@ -142,12 +143,12 @@ def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
                 if single:
                     files.append(single)
             if files:
-                post.media.all().delete()
+                feed.media.all().delete()
                 owner_key = str(vendor.id)
                 media_list = []
                 for f in files:
                     try:
-                        url, is_video = upload_django_file("posts", owner_key, f)
+                        url, is_video = upload_django_file("feeds", owner_key, f)
                     except SupabaseNotConfiguredError:
                         return ResponseService.response(
                             "INTERNAL_SERVER_ERROR",
@@ -178,13 +179,13 @@ def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
                         )
                     media_list.append({"url": url, "is_video": is_video})
                 for i, media_item in enumerate(media_list):
-                    PostMedia.objects.create(
-                        post=post,
+                    FeedMedia.objects.create(
+                        feed=feed,
                         url=media_item["url"],
                         is_video=media_item.get("is_video", False),
                         sort_order=i,
                     )
-            post.save()
+            feed.save()
         else:
             data = request.data
             errors = ValidatorService.validate(
@@ -200,36 +201,36 @@ def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
                     status.HTTP_400_BAD_REQUEST,
                 )
             if "caption" in data:
-                post.caption = (data.get("caption") or "") or ""
+                feed.caption = (data.get("caption") or "") or ""
             if "media" in data:
                 media_list, media_err = _validate_media_payload(data.get("media"))
                 if media_err is not None:
                     return media_err
-                post.media.all().delete()
+                feed.media.all().delete()
                 for i, media_item in enumerate(media_list or []):
                     if isinstance(media_item, dict) and "url" in media_item:
-                        PostMedia.objects.create(
-                            post=post,
+                        FeedMedia.objects.create(
+                            feed=feed,
                             url=media_item["url"],
                             is_video=media_item.get("is_video", False),
                             sort_order=i,
                         )
-            post.save()
+            feed.save()
 
-        post.refresh_from_db()
-        media_qs = post.media.order_by("sort_order")
+        feed.refresh_from_db()
+        media_qs = feed.media.order_by("sort_order")
         payload = {
-            "id": post.id,
-            "caption": post.caption,
-            "created_at": post.created_at,
+            "id": feed.id,
+            "caption": feed.caption,
+            "created_at": feed.created_at,
             "media": [
                 {"url": m.url, "is_video": m.is_video, "sort_order": m.sort_order}
                 for m in media_qs
             ],
         }
-        return ResponseService.response("SUCCESS", payload, "Post updated successfully.")
-    except Post.DoesNotExist:
-        return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+        return ResponseService.response("SUCCESS", payload, "Feed updated successfully.")
+    except Feed.DoesNotExist:
+        return ResponseService.response("NOT_FOUND", {}, "Feed not found.", status.HTTP_404_NOT_FOUND)
     except ValidationError as e:
         return ResponseService.response(
             "VALIDATION_ERROR",
@@ -336,7 +337,7 @@ def _create_post_from_multipart(request: Request, vendor) -> Response:
     owner_key = str(vendor.id)
     for f in files:
         try:
-            url, is_video = upload_django_file("posts", owner_key, f)
+            url, is_video = upload_django_file("feeds", owner_key, f)
         except SupabaseNotConfiguredError:
             return ResponseService.response(
                 "INTERNAL_SERVER_ERROR",
@@ -372,28 +373,28 @@ def _create_post_from_multipart(request: Request, vendor) -> Response:
 
 def _persist_post(vendor, caption: str, media_list: list) -> Response:
     with transaction.atomic():
-        post = Post.objects.create(vendor=vendor, caption=caption)
+        feed = Feed.objects.create(vendor=vendor, caption=caption)
 
         for i, media_item in enumerate(media_list):
             if isinstance(media_item, dict) and "url" in media_item:
-                PostMedia.objects.create(
-                    post=post,
+                FeedMedia.objects.create(
+                    feed=feed,
                     url=media_item["url"],
                     is_video=media_item.get("is_video", False),
                     sort_order=i,
                 )
 
-    media_qs = post.media.order_by("sort_order")
+    media_qs = feed.media.order_by("sort_order")
     payload = {
-        "id": post.id,
-        "caption": post.caption,
-        "created_at": post.created_at,
+        "id": feed.id,
+        "caption": feed.caption,
+        "created_at": feed.created_at,
         "media": [
             {"url": m.url, "is_video": m.is_video, "sort_order": m.sort_order}
             for m in media_qs
         ],
     }
-    return ResponseService.response("SUCCESS", payload, "Post created successfully.", status.HTTP_201_CREATED)
+    return ResponseService.response("SUCCESS", payload, "Feed created successfully.", status.HTTP_201_CREATED)
 
 
 def run_vendor_post_create(request: Request) -> Response:
@@ -429,11 +430,11 @@ def vendor_post_detail_view(request: Request, post_id: int) -> Response:
     if err is not None:
         return err
     try:
-        post = Post.objects.get(id=post_id, vendor=vendor)
-        post.delete()
-        return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
-    except Post.DoesNotExist:
-        return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+        feed = Feed.objects.get(id=post_id, vendor=vendor)
+        feed.delete()
+        return ResponseService.response("SUCCESS", {}, "Feed deleted.", status.HTTP_204_NO_CONTENT)
+    except Feed.DoesNotExist:
+        return ResponseService.response("NOT_FOUND", {}, "Feed not found.", status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["GET", "POST"])
@@ -479,20 +480,20 @@ def posts_detail_view(request: Request, post_id: int) -> Response:
             )
         if is_admin_user(request.user):
             try:
-                post = Post.objects.get(id=post_id)
-            except Post.DoesNotExist:
-                return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
-            post.delete()
-            return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
+                feed = Feed.objects.get(id=post_id)
+            except Feed.DoesNotExist:
+                return ResponseService.response("NOT_FOUND", {}, "Feed not found.", status.HTTP_404_NOT_FOUND)
+            feed.delete()
+            return ResponseService.response("SUCCESS", {}, "Feed deleted.", status.HTTP_204_NO_CONTENT)
         vendor, err = _require_vendor(request)
         if err is not None:
             return err
         try:
-            post = Post.objects.get(id=post_id, vendor=vendor)
-            post.delete()
-            return ResponseService.response("SUCCESS", {}, "Post deleted.", status.HTTP_204_NO_CONTENT)
-        except Post.DoesNotExist:
-            return ResponseService.response("NOT_FOUND", {}, "Post not found.", status.HTTP_404_NOT_FOUND)
+            feed = Feed.objects.get(id=post_id, vendor=vendor)
+            feed.delete()
+            return ResponseService.response("SUCCESS", {}, "Feed deleted.", status.HTTP_204_NO_CONTENT)
+        except Feed.DoesNotExist:
+            return ResponseService.response("NOT_FOUND", {}, "Feed not found.", status.HTTP_404_NOT_FOUND)
     return ResponseService.response(
         "METHOD_NOT_ALLOWED",
         {"detail": "Method not allowed."},

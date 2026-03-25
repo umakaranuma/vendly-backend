@@ -217,14 +217,25 @@ def post_comments(request: Request, post_id: int) -> Response:
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 20))
             
-            query = (
+            paginated = (
                 QueryBuilderService("feed_comments")
                 .select("feed_comments.id", "feed_comments.text", "feed_comments.like_count", "feed_comments.created_at", "feed_comments.parent_comment_id", "feed_comments.deleted_at", "core_users.first_name", "core_users.last_name", "core_users.avatar_url")
                 .leftJoin("core_users", "core_users.id", "feed_comments.created_by_id")
-                .apply_conditions(f'{{"feed_id": {feed.id}}}', ["feed_id"], "deleted_at IS NULL", [])
+                .where("feed_comments.feed_id", feed.id)
+                .whereNull("feed_comments.deleted_at")
                 .paginate(page, limit, ["feed_comments.created_at"], "feed_comments.created_at", "desc")
             )
-            return ResponseService.response("SUCCESS", query, "Comments retrieved successfully.")
+            
+            if request.user.is_authenticated and paginated.get("data"):
+                comment_ids = [c["id"] for c in paginated["data"]]
+                liked_ids = set(CommentLike.objects.filter(comment_id__in=comment_ids, user=request.user).values_list('comment_id', flat=True))
+                for c in paginated["data"]:
+                    c["is_liked"] = c["id"] in liked_ids
+            elif paginated.get("data"):
+                for c in paginated["data"]:
+                    c["is_liked"] = False
+                    
+            return ResponseService.response("SUCCESS", paginated, "Comments retrieved successfully.")
         except Exception as e:
             return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
@@ -354,9 +365,21 @@ def comment_like(request: Request, comment_id: int) -> Response:
         return ResponseService.response("NOT_FOUND", {}, "Comment not found.", status.HTTP_404_NOT_FOUND)
 
     user = request.user
-    like, created = CommentLike.objects.get_or_create(comment=comment, user=user)
-    if created:
-        comment.like_count += 1
+    with transaction.atomic():
+        like, created = CommentLike.objects.get_or_create(comment=comment, user=user)
+        if created:
+            comment.like_count += 1
+            is_liked = True
+            msg = "Comment liked."
+        else:
+            like.delete()
+            comment.like_count = max(0, comment.like_count - 1)
+            is_liked = False
+            msg = "Comment unliked."
         comment.save(update_fields=["like_count"])
         
-    return ResponseService.response("SUCCESS", {"liked": True, "like_count": comment.like_count}, "Comment liked.")
+    return ResponseService.response(
+        "SUCCESS", 
+        {"is_liked": is_liked, "like_count": comment.like_count}, 
+        msg
+    )

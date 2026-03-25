@@ -132,7 +132,7 @@ urlpatterns = [
     path("api/feed/posts", list_posts),
     path("api/feed/posts/<int:post_id>/like", toggle_feed_like),
     path("api/feed/posts/<int:post_id>/comments", post_comments),
-    path("api/comments/<int:comment_id>/like", comment_like),
+    path("api/feed/comments/<int:comment_id>/like", comment_like),
 
     # Search & Categories
     path("api/categories", categories_list_view),

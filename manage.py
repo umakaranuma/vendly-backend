@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 
 def main():
     """Run administrative tasks."""
+    import pymysql
+    pymysql.install_as_MySQLdb()
+    
     base_dir = Path(__file__).resolve().parent
     load_dotenv(base_dir / ".env")
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'vendly_backend.settings.base')

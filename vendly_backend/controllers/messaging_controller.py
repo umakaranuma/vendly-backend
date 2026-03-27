@@ -30,15 +30,56 @@ def conversations_view(request: Request) -> Response:
             page = int(request.GET.get("page", 1))
             limit = int(request.GET.get("limit", 20))
             
-            # Simple retrieval of conversations for current user
-            query = (
-                QueryBuilderService("conversation_participants")
-                .select("conversations.id", "conversations.updated_at")
-                .leftJoin("conversations", "conversations.id", "conversation_participants.conversation_id")
-                .apply_conditions(f'{{"user_id": {user.id}}}', ["user_id"], "", [])
-                .paginate(page, limit, ["conversations.updated_at"], "conversations.updated_at", "desc")
-            )
-            return ResponseService.response("SUCCESS", query, "Conversations retrieved successfully.")
+            # Fetch conversations the user is part of
+            user_participants = ConversationParticipant.objects.filter(user=user).select_related("conversation")
+            
+            conversations_data = []
+            for up in user_participants:
+                conv = up.conversation
+                # Find the OTHER participant (partner)
+                partner_participant = ConversationParticipant.objects.filter(conversation=conv).exclude(user=user).select_related("user").first()
+                
+                if not partner_participant:
+                    continue
+                
+                partner = partner_participant.user
+                
+                # Get the last message
+                last_msg = Message.objects.filter(conversation=conv).order_by("-created_at").first()
+                
+                conversations_data.append({
+                    "id": conv.id,
+                    "updated_at": conv.updated_at,
+                    "partner": {
+                        "id": partner.id,
+                        "first_name": partner.first_name,
+                        "last_name": partner.last_name,
+                        "avatar_url": partner.avatar_url,
+                        "role": partner.role.name if partner.role else "user"
+                    },
+                    "last_message": {
+                        "text": last_msg.text if last_msg else None,
+                        "attachment_url": last_msg.attachment_url if last_msg else None,
+                        "created_at": last_msg.created_at if last_msg else None,
+                        "is_deleted": last_msg.is_deleted if last_msg else False,
+                        "sender_id": last_msg.sender_id if last_msg else None,
+                    } if last_msg else None
+                })
+            
+            # Sort by updated_at desc
+            conversations_data.sort(key=lambda x: x["updated_at"], reverse=True)
+            
+            # Manual pagination (simplified for now as conversation lists are usually small)
+            start = (page - 1) * limit
+            end = start + limit
+            paginated_data = {
+                "items": [conversations_data[i] for i in range(start, min(end, len(conversations_data)))],
+                "total": len(conversations_data),
+                "page": page,
+                "limit": limit
+            }
+            
+            return ResponseService.response("SUCCESS", paginated_data, "Conversations retrieved successfully.")
         except Exception as e:
             return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
@@ -100,10 +141,30 @@ def messages_view(request: Request, conversation_id: int) -> Response:
             
             query = (
                 QueryBuilderService("messages")
-                .select("messages.id", "messages.sender_id", "messages.text", "messages.attachment_url", "messages.created_at")
+                .select(
+                    "messages.id",
+                    "messages.sender_id",
+                    "messages.text",
+                    "messages.attachment_url",
+                    "messages.is_edited",
+                    "messages.is_deleted",
+                    "messages.created_at",
+                    "core_users.first_name",
+                    "core_users.last_name"
+                )
+                .leftJoin("core_users", "core_users.id", "messages.sender_id")
                 .apply_conditions(f'{{"conversation_id": {conversation_id}}}', ["conversation_id"], "", [])
                 .paginate(page, limit, ["messages.created_at"], "messages.created_at", "desc")
             )
+            
+            # Post-process messages to handle deleted state
+            if "items" in query:
+                for msg in query["items"]:
+                    if msg.get("is_deleted"):
+                        sender_name = f"{msg.get('first_name', '')} {msg.get('last_name', '')}".strip() or "User"
+                        msg["text"] = f"This message was deleted by {sender_name}"
+                        msg["attachment_url"] = None
+                        
             return ResponseService.response("SUCCESS", query, "Messages retrieved successfully.")
         except Exception as e:
             return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
@@ -112,9 +173,10 @@ def messages_view(request: Request, conversation_id: int) -> Response:
         text = request.data.get("text")
         attachment_url = request.data.get("attachment_url")
         
+        # Validation: only text and image allowed, at least one required
         if not text and not attachment_url:
-            return ResponseService.response("BAD_REQUEST", {"detail": "text or attachment_url is required."}, "Validation error", status.HTTP_400_BAD_REQUEST)
-            
+            return ResponseService.response("BAD_REQUEST", {"detail": "Message must contain either text or an image."}, "Validation error", status.HTTP_400_BAD_REQUEST)
+        
         message = Message.objects.create(
             conversation_id=conversation_id,
             sender=request.user,
@@ -135,15 +197,50 @@ def messages_view(request: Request, conversation_id: int) -> Response:
         }
         return ResponseService.response("SUCCESS", payload, "Message sent successfully.", status.HTTP_201_CREATED)
 
-@api_view(["PATCH"])
+
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def read_messages_view(request: Request, conversation_id: int) -> Response:
     try:
         participant = ConversationParticipant.objects.get(conversation_id=conversation_id, user=request.user)
+        participant.last_read_at = timezone.now()
+        participant.save(update_fields=["last_read_at"])
+        return ResponseService.response("SUCCESS", {}, "Messages marked as read.", status.HTTP_200_OK)
     except ConversationParticipant.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Conversation not found.", status.HTTP_404_NOT_FOUND)
-    
-    return ResponseService.response("SUCCESS", {}, "Messages marked as read.", status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def message_detail_view(request: Request, message_id: int) -> Response:
+    try:
+        message = Message.objects.get(id=message_id, sender=request.user)
+    except Message.DoesNotExist:
+        return ResponseService.response("NOT_FOUND", {}, "Message not found or you're not the sender.", status.HTTP_404_NOT_FOUND)
+
+    # Time limit check (1 hour)
+    time_diff = timezone.now() - message.created_at
+    if time_diff.total_seconds() > 3600:
+        return ResponseService.response("BAD_REQUEST", {"detail": "Messages can only be edited or deleted within 1 hour."}, "Time limit exceeded", status.HTTP_400_BAD_REQUEST)
+
+    if request.method == "PATCH":
+        text = request.data.get("text")
+        if not text:
+            return ResponseService.response("BAD_REQUEST", {"detail": "Text is required for editing."}, "Validation error", status.HTTP_400_BAD_REQUEST)
+        
+        message.text = text
+        message.is_edited = True
+        message.save(update_fields=["text", "is_edited", "updated_at"])
+        
+        return ResponseService.response("SUCCESS", {"id": message.id, "text": message.text, "is_edited": True}, "Message edited successfully.")
+
+    elif request.method == "DELETE":
+        message.is_deleted = True
+        message.deleted_at = timezone.now()
+        message.save(update_fields=["is_deleted", "deleted_at", "updated_at"])
+        
+        sender_name = f"{request.user.first_name} {request.user.last_name}".strip() or "User"
+        return ResponseService.response("SUCCESS", {"id": message.id, "text": f"This message was deleted by {sender_name}"}, "Message deleted successfully.")
 
 
 def _sender_type_from_role(user: CoreUser) -> str:

@@ -80,7 +80,9 @@ from vendly_backend.controllers.messaging_controller import (
     messages_view,
     read_messages_view,
     report_chat_messages_view,
+    message_detail_view,
 )
+
 from vendly_backend.controllers.invitations_controller import invitation_templates_view, invitations_view, invitation_detail_view
 from vendly_backend.controllers.categories_controller import categories_list_view, category_detail_view
 from vendly_backend.controllers.favorites_controller import favorites_list_view, favorite_vendor_view
@@ -161,6 +163,8 @@ urlpatterns = [
     path("api/conversations/<int:conversation_id>/messages", messages_view),
     path("api/conversations/<int:conversation_id>/read", read_messages_view),
     path("api/conversations/<int:conversation_id>/report", report_chat_messages_view),
+    path("api/messages/<int:message_id>", message_detail_view),
+
 
     # Invitations
     path("api/invitations/templates", invitation_templates_view),

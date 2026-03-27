@@ -8,7 +8,7 @@ SECRET_KEY = 'django-insecure-(iyg7mq0*@ar@n&29vgs4av3+j%%4a$w(fr60082-dqc_&-0gp
 
 DEBUG = True
 
-ALLOWED_HOSTS: list[str] = ["*"]
+ALLOWED_HOSTS: list[str] = [".vercel.app", "localhost", "127.0.0.1"]
 
 # Comma-separated list, e.g. "http://localhost:3000,https://app.example.com"
 _cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
@@ -30,6 +30,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -101,6 +102,13 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+STATIC_DIRS = [os.path.join(BASE_DIR, 'vendly_backend/static')]
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

@@ -14,4 +14,5 @@ load_dotenv(BASE_DIR / ".env")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "vendly_backend.settings.base")
 
 application = get_wsgi_application()
+app = application
 

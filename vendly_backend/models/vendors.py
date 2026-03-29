@@ -7,6 +7,7 @@ class Category(models.Model):
     name = models.CharField(max_length=255)
     slug = models.CharField(max_length=255, unique=True)
     description = models.TextField(null=True, blank=True)
+    cover_image_url = models.TextField(null=True, blank=True)
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -128,3 +129,21 @@ class VendorSubscription(models.Model):
     class Meta:
         db_table = "vendor_subscriptions"
         app_label = "vendly_backend"
+
+
+class VendorAvailability(models.Model):
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name="availabilities")
+    date = models.DateField()
+    is_available = models.BooleanField(default=True)
+    reason = models.CharField(max_length=255, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vendor_availabilities"
+        app_label = "vendly_backend"
+        unique_together = ('vendor', 'date')
+
+    def __str__(self):
+        return f"{self.vendor.name} - {self.date} - {'Available' if self.is_available else 'Unavailable'}"

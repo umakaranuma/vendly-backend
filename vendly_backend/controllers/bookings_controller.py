@@ -34,15 +34,13 @@ def _user_can_access_booking(user, booking: Booking) -> bool:
     return booking.vendor.user_id == user.id
 
 
-def _vendor_booking_side(user, vendor_profile: Vendor | None, booking: Booking):
+def _vendor_booking_side(user, vendor_profile, booking: Booking):
     """For vendor accounts: incoming vs outgoing request; null for customer-only list."""
-    if vendor_profile is None:
-        return None
-    if booking.requested_by_id == user.id:
-        return "requested"
-    if booking.vendor_id == vendor_profile.id:
+    # If the current user is the vendor for this booking
+    if booking.vendor.user_id == user.id:
         return "received"
-    return None
+    # Otherwise, they are the one who requested it
+    return "requested"
 
 
 def _can_change_booking_status(user, booking: Booking) -> bool:
@@ -101,13 +99,24 @@ def _serialize_booking_list_row(booking: Booking, user, vendor_profile):
         "booking_date": bd_out,
         "location": booking.location,
         "amount": str(booking.amount) if booking.amount is not None else None,
+        "deposit": str(booking.deposit) if booking.deposit is not None else None,
         "status": booking.status.name if booking.status else None,
         "status_type": booking.status.status_type if booking.status else None,
         "first_name": booking.customer.first_name,
         "last_name": booking.customer.last_name,
         "vendor_name": booking.vendor.name,
+        "vendor_id": booking.vendor_id,
+        "vendor_user_id": booking.vendor.user_id,
+        "customer_id": booking.customer_id,
         "requested_by_id": booking.requested_by_id,
         "vendor_booking_side": _vendor_booking_side(user, vendor_profile, booking),
+        "status_note": booking.status_note,
+        "vendor_avatar_url": booking.vendor.user.avatar_url,
+        "vendor_cover_url": booking.vendor.user.cover_url,
+        "cover_url": booking.vendor.user.cover_url, # Fallback for cover
+        "customer_avatar_url": booking.customer.avatar_url,
+        "cancelled_at": booking.cancelled_at.isoformat() if booking.cancelled_at else None,
+        "created_at": booking.created_at.isoformat(),
     }
 
 
@@ -127,9 +136,11 @@ def bookings_list_view(request: Request) -> Response:
 
             vendor_profile = _vendor_for_user(user)
             if vendor_profile is not None:
+                # Vendors see requests they received OR requests they sent
                 qs = Booking.objects.filter(Q(vendor_id=vendor_profile.id) | Q(requested_by=user))
             else:
-                qs = Booking.objects.filter(customer=user)
+                # Regular customers see only their own requests
+                qs = Booking.objects.filter(requested_by=user)
 
             if raw_status_type:
                 if raw_status_type not in ALLOWED_BOOKING_STATUS_TYPES:
@@ -151,7 +162,7 @@ def bookings_list_view(request: Request) -> Response:
                 sid = get_booking_status_ref(booking_status).id
                 qs = qs.filter(status_id=sid)
 
-            qs = qs.select_related("status", "vendor", "customer", "requested_by").order_by("-created_at")
+            qs = qs.select_related("status", "vendor", "vendor__user", "customer", "requested_by").order_by("-created_at")
             paginator = Paginator(qs, limit)
             page_obj = paginator.get_page(page)
             data = [
@@ -249,7 +260,7 @@ def bookings_list_view(request: Request) -> Response:
             location=location,
             amount=amount,
             deposit=deposit,
-            status=get_booking_status_ref("pending"),
+            status=get_booking_status_ref("requested"),
         )
         log_activity(
             actor=user,
@@ -296,9 +307,10 @@ def bookings_list_view(request: Request) -> Response:
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated])
 def booking_status_change_view(request: Request, booking_id: int) -> Response:
-    """Update booking status. Allowed: admin, or the vendor whose service is booked."""
+    """Update booking status. Allowed: admin, the vendor, or the requester (within 5 mins)."""
+    data = request.data
     try:
-        status_ref = _resolve_booking_status_from_request_data(request.data)
+        status_ref = _resolve_booking_status_from_request_data(data)
     except ValueError as e:
         msg = str(e)
         return ResponseService.response(
@@ -314,16 +326,56 @@ def booking_status_change_view(request: Request, booking_id: int) -> Response:
         return ResponseService.response("NOT_FOUND", {}, "Booking not found.", status.HTTP_404_NOT_FOUND)
 
     user = request.user
-    if not _can_change_booking_status(user, booking):
+    is_admin = is_admin_user(user)
+    is_vendor = booking.vendor.user_id == user.id
+    is_requester = booking.requested_by_id == user.id
+
+    if not (is_admin or is_vendor or is_requester):
         return ResponseService.response(
             "FORBIDDEN",
-            {"detail": "Only administrators or the booked vendor can change booking status."},
+            {"detail": "You do not have permission to change this booking status."},
             "Forbidden",
             status.HTTP_403_FORBIDDEN,
         )
 
-    admin_actor = is_admin_user(user)
-    status_name, status_type = _persist_booking_status_and_log(booking, user, status_ref, admin_actor=admin_actor)
+    # Prevent requester from cancelling if it's already accepted or completed
+    if is_requester and not (is_admin or is_vendor):
+        if booking.status and booking.status.status_type == "booking_accepted":
+            return ResponseService.response(
+                "FORBIDDEN",
+                {"detail": "Accepted bookings cannot be cancelled by the requester."},
+                "Forbidden",
+                status.HTTP_403_FORBIDDEN,
+            )
+        if booking.status and booking.status.status_type == "booking_completed":
+            return ResponseService.response(
+                "FORBIDDEN",
+                {"detail": "Completed bookings cannot be cancelled."},
+                "Forbidden",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+    # Handle status notes/reasons
+    reason = data.get("reason") or data.get("status_note") or data.get("cancellation_reason")
+    
+    # Require reason for specific statuses (Accepted, Cancelled)
+    if status_ref.status_type in ["booking_accepted", "booking_cancelled"]:
+        if not reason:
+            return ResponseService.response(
+                "VALIDATION_ERROR",
+                {"reason": ["A reason or note is required for this status change."]},
+                "Validation error",
+                status.HTTP_400_BAD_REQUEST,
+            )
+    
+    booking.status_note = reason
+
+    if status_ref.status_type == "booking_cancelled":
+        from django.utils import timezone
+        booking.cancelled_at = timezone.now()
+        booking.cancelled_by = user
+
+    status_name, status_type = _persist_booking_status_and_log(booking, user, status_ref, admin_actor=is_admin)
     return ResponseService.response(
         "SUCCESS",
         {
@@ -331,6 +383,8 @@ def booking_status_change_view(request: Request, booking_id: int) -> Response:
             "status": status_name,
             "status_type": status_type,
             "status_id": booking.status_id,
+            "status_note": booking.status_note,
+            "cancelled_at": booking.cancelled_at,
         },
         "Booking status updated successfully.",
     )
@@ -340,7 +394,7 @@ def booking_status_change_view(request: Request, booking_id: int) -> Response:
 @permission_classes([IsAuthenticated])
 def booking_detail_view(request: Request, booking_id: int) -> Response:
     try:
-        booking = Booking.objects.select_related("status", "vendor", "customer", "requested_by").get(id=booking_id)
+        booking = Booking.objects.select_related("status", "vendor", "vendor__user", "customer", "requested_by").get(id=booking_id)
     except Booking.DoesNotExist:
         return ResponseService.response("NOT_FOUND", {}, "Booking not found.", status.HTTP_404_NOT_FOUND)
 
@@ -369,6 +423,13 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
         "status_id": booking.status_id,
         "requested_by_id": booking.requested_by_id,
         "vendor_booking_side": _vendor_booking_side(request.user, vendor_profile, booking),
+        "status_note": booking.status_note,
+        "vendor_avatar_url": booking.vendor.user.avatar_url,
+        "vendor_cover_url": booking.vendor.user.cover_url,
+        "cover_url": booking.vendor.user.cover_url, # Fallback for cover
+        "customer_avatar_url": booking.customer.avatar_url,
+        "cancelled_at": booking.cancelled_at,
+        "cancelled_by_id": booking.cancelled_by_id,
         "created_at": booking.created_at,
         "updated_at": booking.updated_at,
     }

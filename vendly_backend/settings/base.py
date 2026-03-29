@@ -8,7 +8,12 @@ SECRET_KEY = 'django-insecure-(iyg7mq0*@ar@n&29vgs4av3+j%%4a$w(fr60082-dqc_&-0gp
 
 DEBUG = True
 
-ALLOWED_HOSTS: list[str] = [".vercel.app", "localhost", "127.0.0.1"]
+ALLOWED_HOSTS: list[str] = [
+    ".vercel.app",
+    "localhost",
+    "127.0.0.1",
+    "retha-unbickering-ardella.ngrok-free.dev",
+]
 
 # Comma-separated list, e.g. "http://localhost:3000,https://app.example.com"
 _cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
@@ -148,3 +153,5 @@ SUPABASE_STORAGE_BUCKET = _bucket or "media"
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(52 * 1024 * 1024)))
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(52 * 1024 * 1024)))
 
+# Seed data configuration
+SEED_USER_PASSWORD = os.getenv("SEED_USER_PASSWORD", "Pass123!")

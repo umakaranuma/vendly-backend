@@ -28,6 +28,8 @@ class EndpointPermissionMiddleware:
         "api/vendors/<int:vendor_id>/reviews": "public",
         "api/posts": "public",
         "api/posts/<int:post_id>": "public",
+        "api/feed/posts": "public",
+        "api/feed/posts/<int:post_id>/comments": "public",
         "api/subscription/plans": "public",
     }
 

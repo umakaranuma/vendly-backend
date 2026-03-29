@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -42,7 +43,7 @@ from vendly_backend.models import (
     VendorSubscription,
 )
 
-SEED_PASSWORD = "DemoPass123!"
+
 
 # Fixed identities so re-runs stay idempotent.
 CUSTOMER_SEEDS = [
@@ -164,7 +165,7 @@ class Command(BaseCommand):
     help = "Seed demo vendors, customers, categories, and feed-related data."
 
     def handle(self, *args, **options):
-        self.stdout.write("Seeding demo data (password for seed users: %s)" % SEED_PASSWORD)
+        self.stdout.write("Seeding demo data...")
 
         customer_role, _ = CoreRole.objects.get_or_create(
             name="CUSTOMER",
@@ -202,7 +203,7 @@ class Command(BaseCommand):
                 user, created = _get_or_create_user(
                     email=row["email"],
                     phone=row["phone"],
-                    password=SEED_PASSWORD,
+                    password=settings.SEED_USER_PASSWORD,
                     first_name=row["first_name"],
                     last_name=row["last_name"],
                     role=customer_role,
@@ -219,7 +220,7 @@ class Command(BaseCommand):
                 user, u_created = _get_or_create_user(
                     email=row["email"],
                     phone=row["phone"],
-                    password=SEED_PASSWORD,
+                    password=settings.SEED_USER_PASSWORD,
                     first_name=row["first_name"],
                     last_name=row["last_name"],
                     role=vendor_role,
@@ -262,19 +263,30 @@ class Command(BaseCommand):
                 )
 
             # Subscription plans
-            starter, _ = SubscriptionPlan.objects.update_or_create(
-                name="Starter",
-                defaults={"max_packages": 3, "price": Decimal("29.00"), "description": "Up to 3 active packages."},
+            free_plan, _ = SubscriptionPlan.objects.get_or_create(
+                name="Free",
+                defaults={"max_packages": 1, "price": Decimal("0.00"), "description": "Basic analytics for growing vendors."},
             )
-            pro, _ = SubscriptionPlan.objects.update_or_create(
-                name="Pro",
-                defaults={"max_packages": 10, "price": Decimal("79.00"), "description": "Up to 10 active packages."},
+            starter_plan, _ = SubscriptionPlan.objects.get_or_create(
+                name="Starter",
+                defaults={"max_packages": 5, "price": Decimal("1500.00"), "description": "Unlock revenue and order breakdowns."},
+            )
+            premium_plan, _ = SubscriptionPlan.objects.get_or_create(
+                name="Premium",
+                defaults={"max_packages": 20, "price": Decimal("4500.00"), "description": "Full audience insights and engagement suite."},
             )
 
             now = timezone.now()
             for i, vendor in enumerate(vendors):
                 row = VENDOR_SEEDS[i]
-                plan = starter if i % 2 == 0 else pro
+                # Rotate plans: Free -> Starter -> Premium
+                plan_idx = i % 3
+                if plan_idx == 0:
+                    plan = free_plan
+                elif plan_idx == 1:
+                    plan = starter_plan
+                else:
+                    plan = premium_plan
                 if not VendorSubscription.objects.filter(vendor=vendor, plan=plan).exists():
                     VendorSubscription.objects.create(
                         vendor=vendor,
@@ -357,7 +369,7 @@ class Command(BaseCommand):
                         FeedComment.objects.create(
                             feed=feed,
                             created_by=customer_a,
-                            comment="This looks amazing — saving for our date!",
+                            text="This looks amazing — saving for our date!",
                         )
 
             # Favorites

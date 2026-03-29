@@ -235,7 +235,7 @@ def _public_vendor_payload(vendor: Vendor, request=None) -> dict:
         "city": vendor.city,
         "category_id": vendor.category_id,
         "category": (
-            {"id": cat.id, "name": cat.name, "slug": cat.slug}
+            {"id": cat.id, "name": cat.name, "slug": cat.slug, "cover_image_url": cat.cover_image_url}
             if cat
             else None
         ),

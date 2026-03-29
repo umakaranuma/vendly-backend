@@ -98,6 +98,10 @@ from vendly_backend.controllers.vendor_posts_controller import (
 from vendly_backend.controllers.vendor_packages_controller import vendor_packages_view, vendor_package_detail_view, vendor_public_packages_view
 from vendly_backend.controllers.vendor_subscriptions_controller import vendor_subscription_view, subscription_plans_view
 from vendly_backend.controllers.vendor_analytics_controller import vendor_analytics_view
+from vendly_backend.controllers.vendor_calendar_controller import (
+    vendor_calendar_view,
+    vendor_availability_update_view,
+)
 from vendly_backend.controllers.notifications_controller import notifications_view, read_notification_view, notification_settings_view
 
 
@@ -153,7 +157,9 @@ urlpatterns = [
     path("api/bookings/<int:booking_id>/status", booking_status_change_view),
     path("api/bookings/<int:booking_id>", booking_detail_view),
 
-    # Reviews
+    # Reviews & Calendar
+    path("api/vendors/<int:vendor_id>/calendar", vendor_calendar_view),
+    path("api/vendor/availability", vendor_availability_update_view),
     path("api/vendors/<int:vendor_id>/reviews", vendor_reviews_view),
     path("api/vendors/<int:vendor_id>/posts", vendor_posts_by_vendor_id_view),
 

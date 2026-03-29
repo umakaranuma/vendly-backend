@@ -11,21 +11,26 @@ class Command(BaseCommand):
         with transaction.atomic():
             # 1. Categories
             categories = [
-                ("Photography", "photography", "Professional wedding and event photographers", 10),
-                ("Catering", "catering", "Food and beverage services for events", 20),
-                ("Venue", "venue", "Event spaces and locations", 30),
-                ("Music & DJ", "music-dj", "Live bands, DJs, and sound services", 40),
-                ("Decor & Florist", "decor-florist", "Event decoration and floral arrangements", 50),
-                ("Wedding Planning", "wedding-planning", "Full wedding planning and coordination", 60),
-                ("Makeup & Hair", "makeup-hair", "Beauty services for brides and guests", 70),
-                ("Videography", "videography", "Event filming and editing", 80),
+                ("Photography", "photography", "Professional wedding and event photographers", 10, "https://images.unsplash.com/photo-1542038784456-1ea8e935640e?w=800"),
+                ("Catering", "catering", "Food and beverage services for events", 20, "https://images.unsplash.com/photo-1555244162-803834f70033?w=800"),
+                ("Venue", "venue", "Event spaces and locations", 30, "https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=800"),
+                ("Music & DJ", "music-dj", "Live bands, DJs, and sound services", 40, "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=800"),
+                ("Decor & Florist", "decor-florist", "Event decoration and floral arrangements", 50, "https://images.unsplash.com/photo-1519225421980-715cb0215aed?w=800"),
+                ("Wedding Planning", "wedding-planning", "Full wedding planning and coordination", 60, "https://images.unsplash.com/photo-1511795409834-ef04bbd61622?w=800"),
+                ("Makeup & Hair", "makeup-hair", "Beauty services for brides and guests", 70, "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=800"),
+                ("Videography", "videography", "Event filming and editing", 80, "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=800"),
             ]
-            for name, slug, desc, order in categories:
+            for name, slug, desc, order, cover in categories:
                 cat, created = Category.objects.get_or_create(
                     slug=slug,
-                    defaults={"name": name, "description": desc, "sort_order": order}
+                    defaults={"name": name, "description": desc, "sort_order": order, "cover_image_url": cover}
                 )
-                if created:
+                if not created:
+                    # Update existing categories with the cover image
+                    cat.cover_image_url = cover
+                    cat.save()
+                    self.stdout.write(f"  Updated category cover: {name}")
+                else:
                     self.stdout.write(f"  Created category: {name}")
 
             # 2. Subscription Plans

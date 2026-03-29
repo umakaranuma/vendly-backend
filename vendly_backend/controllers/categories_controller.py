@@ -17,7 +17,7 @@ def categories_list_view(request: Request) -> Response:
         
         query = (
             QueryBuilderService("categories")
-            .select("categories.id", "categories.name", "categories.slug", "categories.description", "categories.sort_order", "categories.created_at")
+            .select("categories.id", "categories.name", "categories.slug", "categories.description", "categories.cover_image_url", "categories.sort_order", "categories.created_at")
             .paginate(page, limit, ["categories.sort_order"], "categories.sort_order", "asc")
         )
         return ResponseService.response("SUCCESS", query, "Categories retrieved successfully.")
@@ -35,6 +35,7 @@ def category_detail_view(request: Request, category_id: int) -> Response:
             "name": category.name,
             "slug": category.slug,
             "description": category.description,
+            "cover_image_url": category.cover_image_url,
             "sort_order": category.sort_order,
             "created_at": category.created_at,
             "updated_at": category.updated_at

@@ -7,6 +7,7 @@ class Category(models.Model):
     name = models.CharField(max_length=255)
     slug = models.CharField(max_length=255, unique=True)
     description = models.TextField(null=True, blank=True)
+    cover_image_url = models.TextField(null=True, blank=True)
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

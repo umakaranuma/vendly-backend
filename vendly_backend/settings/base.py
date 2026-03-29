@@ -153,3 +153,5 @@ SUPABASE_STORAGE_BUCKET = _bucket or "media"
 DATA_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("DATA_UPLOAD_MAX_MEMORY_SIZE", str(52 * 1024 * 1024)))
 FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv("FILE_UPLOAD_MAX_MEMORY_SIZE", str(52 * 1024 * 1024)))
 
+# Seed data configuration
+SEED_USER_PASSWORD = os.getenv("SEED_USER_PASSWORD", "Pass123!")

@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -42,7 +43,7 @@ from vendly_backend.models import (
     VendorSubscription,
 )
 
-SEED_PASSWORD = "DemoPass123!"
+
 
 # Fixed identities so re-runs stay idempotent.
 CUSTOMER_SEEDS = [
@@ -164,7 +165,7 @@ class Command(BaseCommand):
     help = "Seed demo vendors, customers, categories, and feed-related data."
 
     def handle(self, *args, **options):
-        self.stdout.write("Seeding demo data (password for seed users: %s)" % SEED_PASSWORD)
+        self.stdout.write("Seeding demo data...")
 
         customer_role, _ = CoreRole.objects.get_or_create(
             name="CUSTOMER",
@@ -202,7 +203,7 @@ class Command(BaseCommand):
                 user, created = _get_or_create_user(
                     email=row["email"],
                     phone=row["phone"],
-                    password=SEED_PASSWORD,
+                    password=settings.SEED_USER_PASSWORD,
                     first_name=row["first_name"],
                     last_name=row["last_name"],
                     role=customer_role,
@@ -219,7 +220,7 @@ class Command(BaseCommand):
                 user, u_created = _get_or_create_user(
                     email=row["email"],
                     phone=row["phone"],
-                    password=SEED_PASSWORD,
+                    password=settings.SEED_USER_PASSWORD,
                     first_name=row["first_name"],
                     last_name=row["last_name"],
                     role=vendor_role,

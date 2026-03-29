@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from vendly_backend.models import CoreRole, CoreStatus, CoreUser
@@ -51,7 +52,7 @@ class Command(BaseCommand):
             if not CoreUser.objects.filter(email="admin@vendly.app").exists():
                 admin_user = CoreUser.objects.create_superuser(
                     email="admin@vendly.app",
-                    password="AdminPass123!",
+                    password=settings.SEED_USER_PASSWORD,
                     first_name="Super",
                     last_name="Admin",
                     role=admin_role,
@@ -61,7 +62,7 @@ class Command(BaseCommand):
             if not CoreUser.objects.filter(email="staff@vendly.app").exists():
                 staff_user = CoreUser.objects.create_user(
                     email="staff@vendly.app",
-                    password="StaffPass123!",
+                    password=settings.SEED_USER_PASSWORD,
                     first_name="Staff",
                     last_name="Member",
                     is_staff=True,

@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
+from django.conf import settings
 from vendly_backend.models import (
     CoreUser, CoreRole, CoreStatus, VendorProfile, Vendor, Category,
     VendorGallery, Listing, SubscriptionPlan, VendorPackage,
@@ -47,7 +48,7 @@ class Command(BaseCommand):
                     }
                 )
                 if created:
-                    user.set_password("Pass123!")
+                    user.set_password(settings.SEED_USER_PASSWORD)
                     user.save()
                     self.stdout.write(f"  Created customer: {email}")
                 customers.append(user)
@@ -70,7 +71,7 @@ class Command(BaseCommand):
                     }
                 )
                 if created:
-                    user.set_password("Pass123!")
+                    user.set_password(settings.SEED_USER_PASSWORD)
                     user.save()
                     self.stdout.write(f"  Created vendor user: {email}")
                 

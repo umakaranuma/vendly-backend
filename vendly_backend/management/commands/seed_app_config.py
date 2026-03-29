@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
-from vendly_backend.models import Category, SubscriptionPlan, InvitationTemplateType, InvitationTemplate
+from vendly_backend.models import Category, InvitationTemplateType, InvitationTemplate
 
 class Command(BaseCommand):
     help = "Seed application configuration (categories, plans, templates)."
@@ -33,20 +33,7 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(f"  Created category: {name}")
 
-            # 2. Subscription Plans
-            plans = [
-                ("Free", 1, 0.00, "Basic plan for new vendors"),
-                ("Starter", 3, 29.00, "Up to 3 active packages"),
-                ("Pro", 10, 79.00, "Up to 10 active packages"),
-                ("Enterprise", 50, 199.00, "Unlimited packages and premium support"),
-            ]
-            for name, max_pkg, price, desc in plans:
-                plan, created = SubscriptionPlan.objects.get_or_create(
-                    name=name,
-                    defaults={"max_packages": max_pkg, "price": price, "description": desc}
-                )
-                if created:
-                    self.stdout.write(f"  Created plan: {name}")
+
 
             # 3. Invitation Template Types
             types = [

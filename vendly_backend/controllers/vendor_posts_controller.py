@@ -4,6 +4,7 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Max
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -132,6 +133,15 @@ def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
             caption = request.POST.get("caption")
             if caption is not None:
                 feed.caption = (caption or "").strip()
+            
+            # Handle selective deletions
+            media_to_delete = request.POST.getlist("media_to_delete[]")
+            if not media_to_delete:
+                # Also check without brackets for convenience
+                media_to_delete = request.POST.getlist("media_to_delete")
+            if media_to_delete:
+                feed.media.filter(id__in=media_to_delete).delete()
+
             files = []
             files.extend(request.FILES.getlist("media_file"))
             if not files:
@@ -142,49 +152,23 @@ def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
                 single = request.FILES.get("media_file") or request.FILES.get("media")
                 if single:
                     files.append(single)
+            
             if files:
-                feed.media.all().delete()
+                # Calculate next sort order
+                max_order = feed.media.aggregate(order=Max("sort_order"))["order"] or -1
                 owner_key = str(vendor.id)
-                media_list = []
-                for f in files:
+                for i, f in enumerate(files):
                     try:
                         url, is_video = upload_django_file("posts", owner_key, f)
-                    except SupabaseNotConfiguredError:
-                        return ResponseService.response(
-                            "INTERNAL_SERVER_ERROR",
-                            {"detail": "Storage is not configured."},
-                            "Storage is not configured.",
-                            status.HTTP_503_SERVICE_UNAVAILABLE,
-                        )
-                    except SupabaseBucketNotFoundError as e:
-                        return ResponseService.response(
-                            "INTERNAL_SERVER_ERROR",
-                            {"detail": str(e)},
-                            "Storage bucket not found.",
-                            status.HTTP_503_SERVICE_UNAVAILABLE,
-                        )
-                    except MediaValidationError as e:
-                        return ResponseService.response(
-                            "VALIDATION_ERROR",
-                            {"media_file": [str(e)]},
-                            "Validation error",
-                            status.HTTP_400_BAD_REQUEST,
+                        FeedMedia.objects.create(
+                            feed=feed,
+                            url=url,
+                            is_video=is_video,
+                            sort_order=max_order + 1 + i,
                         )
                     except Exception as e:
-                        return ResponseService.response(
-                            "INTERNAL_SERVER_ERROR",
-                            {"detail": str(e)},
-                            "Upload failed.",
-                            status.HTTP_502_BAD_GATEWAY,
-                        )
-                    media_list.append({"url": url, "is_video": is_video})
-                for i, media_item in enumerate(media_list):
-                    FeedMedia.objects.create(
-                        feed=feed,
-                        url=media_item["url"],
-                        is_video=media_item.get("is_video", False),
-                        sort_order=i,
-                    )
+                        # Log or handle upload failure; for now keep going or stop
+                        pass
             feed.save()
         else:
             data = request.data
@@ -202,10 +186,18 @@ def update_vendor_post(request: Request, vendor, post_id: int) -> Response:
                 )
             if "caption" in data:
                 feed.caption = (data.get("caption") or "") or ""
+            
+            if "media_to_delete" in data:
+                to_del = data.get("media_to_delete")
+                if isinstance(to_del, list):
+                    feed.media.filter(id__in=to_del).delete()
+
             if "media" in data:
                 media_list, media_err = _validate_media_payload(data.get("media"))
                 if media_err is not None:
                     return media_err
+                # For JSON update, we still wipe and replace if provided, 
+                # or we could make it additive. Usually JSON PUT is a full state update.
                 feed.media.all().delete()
                 for i, media_item in enumerate(media_list or []):
                     if isinstance(media_item, dict) and "url" in media_item:

@@ -96,7 +96,7 @@ from vendly_backend.controllers.vendor_posts_controller import (
     vendor_posts_by_vendor_id_view,
 )
 from vendly_backend.controllers.vendor_packages_controller import vendor_packages_view, vendor_package_detail_view, vendor_public_packages_view
-from vendly_backend.controllers.vendor_subscriptions_controller import vendor_subscription_view, subscription_plans_view
+from vendly_backend.controllers.vendor_subscriptions_controller import vendor_subscription_view, subscription_plans_view, activate_subscription_view
 from vendly_backend.controllers.vendor_analytics_controller import vendor_analytics_view
 from vendly_backend.controllers.vendor_calendar_controller import (
     vendor_calendar_view,
@@ -193,7 +193,8 @@ urlpatterns = [
     path("api/vendors/<int:vendor_id>/packages", vendor_public_packages_view),  # public by vendor_id
     path("api/vendor/packages", vendor_packages_view),                          # self (logged-in vendor)
     path("api/vendor/packages/<int:package_id>", vendor_package_detail_view),   # self (logged-in vendor)
-    path("api/vendor/subscription", vendor_subscription_view),                  # self (logged-in vendor)
+    path("api/vendor/subscription", vendor_subscription_view, name="vendor_subscription"),
+    path("api/vendor/subscription/activate", activate_subscription_view, name="activate_subscription"),
     path("api/subscription/plans", subscription_plans_view),
 
     # Vendor - Analytics (self)

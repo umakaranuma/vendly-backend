@@ -108,9 +108,11 @@ def _serialize_booking_list_row(booking: Booking, user, vendor_profile):
         "last_name": booking.customer.last_name,
         "vendor_name": booking.vendor.name,
         "vendor_id": booking.vendor_id,
+        "vendor_user_id": booking.vendor.user_id,
+        "customer_id": booking.customer_id,
         "requested_by_id": booking.requested_by_id,
         "vendor_booking_side": _vendor_booking_side(user, vendor_profile, booking),
-        "cancellation_reason": booking.cancellation_reason,
+        "status_note": booking.status_note,
         "cancelled_at": booking.cancelled_at.isoformat() if booking.cancelled_at else None,
         "created_at": booking.created_at.isoformat(),
     }
@@ -256,7 +258,7 @@ def bookings_list_view(request: Request) -> Response:
             location=location,
             amount=amount,
             deposit=deposit,
-            status=get_booking_status_ref("pending"),
+            status=get_booking_status_ref("requested"),
         )
         log_activity(
             actor=user,
@@ -347,17 +349,23 @@ def booking_status_change_view(request: Request, booking_id: int) -> Response:
                 status.HTTP_403_FORBIDDEN,
             )
 
-    # Handle cancellation reason
-    if status_ref.status_type == "booking_cancelled":
-        reason = data.get("cancellation_reason")
+    # Handle status notes/reasons
+    reason = data.get("reason") or data.get("status_note") or data.get("cancellation_reason")
+    
+    # Require reason for specific statuses (Accepted, Cancelled)
+    if status_ref.status_type in ["booking_accepted", "booking_cancelled"]:
         if not reason:
             return ResponseService.response(
                 "VALIDATION_ERROR",
-                {"cancellation_reason": ["Cancellation reason is required."]},
+                {"reason": ["A reason or note is required for this status change."]},
                 "Validation error",
                 status.HTTP_400_BAD_REQUEST,
             )
-        booking.cancellation_reason = reason
+    
+    booking.status_note = reason
+
+    if status_ref.status_type == "booking_cancelled":
+        from django.utils import timezone
         booking.cancelled_at = timezone.now()
         booking.cancelled_by = user
 
@@ -369,7 +377,7 @@ def booking_status_change_view(request: Request, booking_id: int) -> Response:
             "status": status_name,
             "status_type": status_type,
             "status_id": booking.status_id,
-            "cancellation_reason": booking.cancellation_reason,
+            "status_note": booking.status_note,
             "cancelled_at": booking.cancelled_at,
         },
         "Booking status updated successfully.",
@@ -409,7 +417,7 @@ def booking_detail_view(request: Request, booking_id: int) -> Response:
         "status_id": booking.status_id,
         "requested_by_id": booking.requested_by_id,
         "vendor_booking_side": _vendor_booking_side(request.user, vendor_profile, booking),
-        "cancellation_reason": booking.cancellation_reason,
+        "status_note": booking.status_note,
         "cancelled_at": booking.cancelled_at,
         "cancelled_by_id": booking.cancelled_by_id,
         "created_at": booking.created_at,

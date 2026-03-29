@@ -6,10 +6,12 @@ from functools import lru_cache
 
 # Maps API / legacy name -> CoreStatus.status_type (seeded in migrations).
 BOOKING_STATUS_TYPE_BY_NAME: dict[str, str] = {
+    "requested": "booking_requested",
     "pending": "booking_pending",
-    "confirmed": "booking_confirmed",
+    "accepted": "booking_accepted",
     "completed": "booking_completed",
     "cancelled": "booking_cancelled",
+    "canceled": "booking_cancelled",
 }
 
 ALLOWED_BOOKING_STATUS_NAMES = frozenset(BOOKING_STATUS_TYPE_BY_NAME.keys())

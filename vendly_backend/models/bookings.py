@@ -32,7 +32,8 @@ class Booking(models.Model):
         related_name="bookings",
     )
 
-    cancellation_reason = models.TextField(null=True, blank=True)
+    # Note or reason provided during any status change (Accept, Decline, Cancel).
+    status_note = models.TextField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancelled_by = models.ForeignKey(
         CoreUser,

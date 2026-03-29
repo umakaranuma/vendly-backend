@@ -7,22 +7,22 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         plans = [
             {
-                'name': 'Starter',
+                'name': 'Free',
                 'price': 0.00,
-                'max_packages': 2,
-                'description': 'Basic analytics, 2 pricing packages, single vendor profile.'
+                'max_packages': 1,
+                'description': 'Baseline analytics, 1 pricing package, standard profile visibility.'
             },
             {
-                'name': 'Professional',
+                'name': 'Starter',
                 'price': 1500.00,
-                'max_packages': 10,
-                'description': 'Audience locations, orders breakdown, 10 pricing packages.'
+                'max_packages': 5,
+                'description': 'Advanced analytics including order breakdowns, up to 5 pricing packages.'
             },
             {
                 'name': 'Premium',
                 'price': 4500.00,
-                'max_packages': 100,
-                'description': 'Full analytics suite, engagement metrics, multi-vendor management.'
+                'max_packages': 50,
+                'description': 'Full analytics suite with audience location insights, priority support, and up to 50 pricing packages.'
             }
         ]
 

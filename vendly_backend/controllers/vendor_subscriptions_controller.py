@@ -30,8 +30,21 @@ def vendor_subscription_view(request: Request) -> Response:
         )
 
         if not active_sub:
+            free_plan = SubscriptionPlan.objects.filter(name="Free").first()
             return ResponseService.response(
-                "SUCCESS", {"active": False}, "No active subscription found."
+                "SUCCESS",
+                {
+                    "active": True, # Technically active as "Free"
+                    "subscription_id": 0,
+                    "starts_at": None,
+                    "ends_at": None,
+                    "plan": {
+                        "id": free_plan.id if free_plan else 0,
+                        "name": free_plan.name if free_plan else "Free",
+                        "max_packages": free_plan.max_packages if free_plan else 1,
+                    },
+                },
+                "Free plan active by default."
             )
 
         payload = {

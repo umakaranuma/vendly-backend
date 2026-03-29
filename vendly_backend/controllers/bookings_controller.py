@@ -336,15 +336,19 @@ def booking_status_change_view(request: Request, booking_id: int) -> Response:
             status.HTTP_403_FORBIDDEN,
         )
 
-    # 5-minute rule for requester
+    # Prevent requester from cancelling if it's already accepted or completed
     if is_requester and not (is_admin or is_vendor):
-        from django.utils import timezone
-        from datetime import timedelta
-        now = timezone.now()
-        if now > booking.created_at + timedelta(minutes=5):
+        if booking.status and booking.status.status_type == "booking_accepted":
             return ResponseService.response(
                 "FORBIDDEN",
-                {"detail": "Revert/Cancel window has expired (5 minutes)."},
+                {"detail": "Accepted bookings cannot be cancelled by the requester."},
+                "Forbidden",
+                status.HTTP_403_FORBIDDEN,
+            )
+        if booking.status and booking.status.status_type == "booking_completed":
+            return ResponseService.response(
+                "FORBIDDEN",
+                {"detail": "Completed bookings cannot be cancelled."},
                 "Forbidden",
                 status.HTTP_403_FORBIDDEN,
             )

@@ -40,13 +40,13 @@ def favorites_list_view(request: Request) -> Response:
         limit = int(request.GET.get("limit", 20))
         
         query = (
-            QueryBuilderService("user_favorite_vendors")
+            QueryBuilderService("vendor_followers")
             .select("vendors.id", "vendors.name", "vendors.city", "vendors.category_id", "vendors.rating", "vendors.review_count", "vendors.price_from")
-            .leftJoin("vendors", "vendors.id", "user_favorite_vendors.vendor_id")
-            .apply_conditions(f'{{"user_id": {target_user_id}}}', ["user_id"], "", [])
-            .paginate(page, limit, ["user_favorite_vendors.created_at"], "user_favorite_vendors.created_at", "desc")
+            .leftJoin("vendors", "vendors.id", "vendor_followers.vendor_id")
+            .apply_conditions(f'{{"vendor_followers.user_id": {target_user_id}}}', ["vendor_followers.user_id"], "", [])
+            .paginate(page, limit, ["vendor_followers.created_at"], "vendor_followers.created_at", "desc")
         )
-        return ResponseService.response("SUCCESS", query, "Favorites retrieved successfully.")
+        return ResponseService.response("SUCCESS", query, "Followed vendors retrieved successfully.")
     except Exception as e:
         return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 

@@ -621,6 +621,7 @@ def register_vendor(request: Request) -> Response:
                 user=user,
                 name=name,
                 city=city,
+                category_id=data.get("category_id") or data.get("category"),
                 status="approved",
                 status_ref=approved_status,
             )
@@ -921,6 +922,16 @@ def my_profile_view(request: Request) -> Response:
             )
         if update_fields:
             user.save(update_fields=update_fields)
+        
+        # Handle vendor category update if provided
+        if user.role and user.role.name.upper() == "VENDOR":
+            category_id = data.get("category_id") or data.get("category")
+            if category_id:
+                vendor = getattr(user, "vendor", None)
+                if vendor:
+                    vendor.category_id = category_id
+                    vendor.save(update_fields=["category_id"])
+        
         message = "Profile updated successfully."
     else:
         message = "Profile fetched successfully."

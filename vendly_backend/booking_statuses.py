@@ -9,6 +9,7 @@ BOOKING_STATUS_TYPE_BY_NAME: dict[str, str] = {
     "requested": "booking_requested",
     "pending": "booking_pending",
     "accepted": "booking_accepted",
+    "confirmed": "booking_accepted",
     "completed": "booking_completed",
     "cancelled": "booking_cancelled",
     "canceled": "booking_cancelled",

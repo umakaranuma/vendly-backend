@@ -1,5 +1,5 @@
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework import status
@@ -178,7 +178,7 @@ def retrieve_feed_post_impl(request: Request, feed_id: int) -> Response:
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def list_posts(request: Request) -> Response:
     return list_posts_impl(request)
 
@@ -205,7 +205,7 @@ def toggle_feed_like(request: Request, post_id: int) -> Response:
     return ResponseService.response("SUCCESS", {"like_count": feed.like_count, "is_liked": created}, msg)
 
 @api_view(["GET", "POST", "PUT", "DELETE"])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def post_comments(request: Request, post_id: int) -> Response:
     try:
         feed = Feed.objects.get(id=post_id)
@@ -239,7 +239,16 @@ def post_comments(request: Request, post_id: int) -> Response:
         except Exception as e:
             return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
-    elif request.method == "POST":
+    # Mutation methods below require authentication
+    if not request.user.is_authenticated:
+        return ResponseService.response(
+            "UNAUTHORIZED",
+            {"detail": "Authentication required to comment."},
+            "Authentication required",
+            status.HTTP_401_UNAUTHORIZED
+        )
+
+    if request.method == "POST":
         text = request.data.get("text") or request.data.get("comment")
         parent_id = request.data.get("parent_id")
         

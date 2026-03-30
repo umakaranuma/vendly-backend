@@ -15,7 +15,7 @@ import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 
-from vendly_backend.models import Vendor, VendorFollower, VendorReport
+from vendly_backend.models import Vendor, VendorFollower, VendorReport, VendorProfile
 from vendly_backend.permissions import is_admin_user
 from vendly_backend.vendor_ratings import public_vendor_rating_and_count
 
@@ -233,6 +233,17 @@ def _public_vendor_payload(vendor: Vendor, request=None) -> dict:
         "name": vendor.name,
         "slug": vendor.slug,
         "city": vendor.city,
+        "address": getattr(u.profile, "address", "") if hasattr(u, "profile") else "",
+        "latitude": (
+            float(u.profile.latitude)
+            if hasattr(u, "profile") and u.profile.latitude is not None
+            else None
+        ),
+        "longitude": (
+            float(u.profile.longitude)
+            if hasattr(u, "profile") and u.profile.longitude is not None
+            else None
+        ),
         "category_id": vendor.category_id,
         "category": (
             {"id": cat.id, "name": cat.name, "slug": cat.slug, "cover_image_url": cat.cover_image_url}

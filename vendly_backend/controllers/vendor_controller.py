@@ -15,7 +15,7 @@ import mServices.ResponseService as ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from mServices.ValidatorService import ValidatorService
 
-from vendly_backend.models import Vendor, VendorFollower
+from vendly_backend.models import Vendor, VendorFollower, VendorReport
 from vendly_backend.permissions import is_admin_user
 from vendly_backend.vendor_ratings import public_vendor_rating_and_count
 
@@ -244,8 +244,9 @@ def _public_vendor_payload(vendor: Vendor, request=None) -> dict:
         "price_from": str(vendor.price_from) if vendor.price_from is not None else None,
         "bio": vendor.bio,
         "status": _public_vendor_status_display(vendor),
-        "created_at": vendor.created_at.isoformat() if vendor.created_at else None,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
         "followers_count": vendor.followers_count if hasattr(vendor, 'followers_count') else 0,
+        "following_count": VendorFollower.objects.filter(user=vendor.user).count(),
         "is_followed_by_me": is_followed_by_me,
         "user": {
             "id": u.id,
@@ -389,4 +390,47 @@ def public_vendors_list_view(request: Request) -> Response:
 def public_vendor_detail_view(request: Request, vendor_id: int) -> Response:
     if request.method == "GET":
         return retrieve_public_vendor(request, vendor_id)
-    return delete_vendor_as_admin(request, vendor_id)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def report_vendor_view(request: Request, vendor_id: int) -> Response:
+    """Report a vendor for spam, inappropriate content, etc."""
+    try:
+        vendor = Vendor.objects.get(pk=vendor_id)
+    except Vendor.DoesNotExist:
+        return ResponseService.response(
+            "NOT_FOUND",
+            {},
+            "Vendor not found.",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    data = request.data
+    errors = ValidatorService.validate(
+        data,
+        rules={
+            "reason": "required|string|max:255",
+            "details": "nullable|string",
+        },
+        custom_messages={},
+    )
+    if errors:
+        return ResponseService.response(
+            "VALIDATION_ERROR",
+            errors,
+            "Validation Error",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    report = VendorReport.objects.create(
+        vendor=vendor,
+        reporter=request.user,
+        reason=data.get("reason"),
+        details=data.get("details"),
+    )
+
+    return ResponseService.response(
+        "SUCCESS",
+        {"id": report.id},
+        "Report submitted successfully. Thank you for helping keep our community safe.",
+        status.HTTP_201_CREATED,
+    )

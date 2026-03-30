@@ -147,3 +147,29 @@ class VendorAvailability(models.Model):
 
     def __str__(self):
         return f"{self.vendor.name} - {self.date} - {'Available' if self.is_available else 'Unavailable'}"
+
+
+class VendorReport(models.Model):
+    vendor = models.ForeignKey(Vendor, on_delete=models.CASCADE, related_name="reports")
+    reporter = models.ForeignKey(CoreUser, on_delete=models.CASCADE, related_name="vendor_reports")
+    reason = models.CharField(max_length=255)
+    details = models.TextField(null=True, blank=True)
+    
+    # Optional status for admin tracking (e.g. pending, reviewed, action_taken)
+    status_ref = models.ForeignKey(
+        CoreStatus,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vendor_reports",
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vendor_reports"
+        app_label = "vendly_backend"
+
+    def __str__(self):
+        return f"Report on {self.vendor.name} by {self.reporter.email}"

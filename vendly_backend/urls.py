@@ -68,6 +68,7 @@ from vendly_backend.controllers.vendor_controller import (
     public_vendor_detail_view,
     public_vendors_list_view,
     vendor_profile_view,
+    report_vendor_view,
 )
 from vendly_backend.controllers.feed_controller import list_posts, toggle_feed_like, post_comments, comment_like, vendor_follow
 from vendly_backend.controllers.bookings_controller import (
@@ -155,6 +156,7 @@ urlpatterns = [
     path("api/vendors/<int:vendor_id>", public_vendor_detail_view),
     path("api/vendors/<int:vendor_id>/favorite", favorite_vendor_view),
     path("api/vendors/<int:vendor_id>/follow", vendor_follow),
+    path("api/vendors/<int:vendor_id>/report", report_vendor_view),
 
     # Bookings
     path("api/bookings", bookings_list_view),

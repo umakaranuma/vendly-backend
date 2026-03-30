@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from mServices.ResponseService import ResponseService
-from vendly_backend.models import Booking, Category, CoreUser, Vendor
+from vendly_backend.models import Booking, Category, CoreUser, Vendor, VendorSubscription
 def _last_month_range():
     now = timezone.now()
     first_day_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -62,11 +62,22 @@ def admin_dashboard_summary_view(request: Request) -> Response:
             }
         )
 
+    # Package activations total (sum of prices of all active subscriptions created last month)
+    package_activations_total = (
+        VendorSubscription.objects.filter(
+            is_active=True,
+            created_at__gte=last_month_start,
+            created_at__lt=last_month_end,
+        ).aggregate(total_price=Sum("plan__price"))["total_price"]
+        or 0
+    )
+
     payload = {
         "total_users": total_users,
         "total_vendors": total_vendors,
         "new_users_last_month": new_users_last_month,
         "earnings_last_month": str(earnings_last_month),
+        "package_activations_total": str(package_activations_total),
         "categorywise_vendors": categorywise_vendors,
     }
 
@@ -97,18 +108,24 @@ def admin_best_performers_view(request: Request) -> Response:
     page = max(page, 1)
     limit = max(limit, 1)
 
-    try:
-        year = int(year_param) if year_param else now.year
-        month = int(month_param) if month_param else now.month
-        if month < 1 or month > 12:
-            raise ValueError("Invalid month")
-    except ValueError:
-        return ResponseService.response(
-            "BAD_REQUEST",
-            {"detail": "Query params `year` and `month` must be valid numbers."},
-            "Validation error",
-            status.HTTP_400_BAD_REQUEST,
-        )
+    # If year/month not provided, default to PREVIOUS month
+    if not year_param or not month_param:
+        prev_month_start, prev_month_end = _last_month_range()
+        year = prev_month_start.year
+        month = prev_month_start.month
+    else:
+        try:
+            year = int(year_param)
+            month = int(month_param)
+            if month < 1 or month > 12:
+                raise ValueError("Invalid month")
+        except ValueError:
+            return ResponseService.response(
+                "BAD_REQUEST",
+                {"detail": "Query params `year` and `month` must be valid numbers."},
+                "Validation error",
+                status.HTTP_400_BAD_REQUEST,
+            )
 
     period_start = now.replace(year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0)
     if month == 12:
@@ -132,10 +149,13 @@ def admin_best_performers_view(request: Request) -> Response:
             comments_count=Count(
                 "posts__comments",
                 filter=Q(posts__comments__created_at__gte=period_start, posts__comments__created_at__lt=period_end),
-                distinct=True,
+            ),
+            followers_count_at_period=Count(
+                "followers",
+                filter=Q(followers__created_at__gte=period_start, followers__created_at__lt=period_end),
             ),
         )
-        .order_by("-bookings_count", "-likes_count", "-comments_count", "id")
+        .order_by("-bookings_count", "-likes_count", "-comments_count", "-followers_count_at_period", "id")
     )
 
     total = qs.count()
@@ -158,7 +178,10 @@ def admin_best_performers_view(request: Request) -> Response:
                 "bookings_count": vendor.bookings_count,
                 "likes_count": vendor.likes_count,
                 "comments_count": vendor.comments_count,
-                "performance_score": vendor.bookings_count + vendor.likes_count + vendor.comments_count,
+                "followers_count": vendor.followers_count_at_period,
+                "performance_score": (
+                    vendor.bookings_count + vendor.likes_count + vendor.comments_count + vendor.followers_count_at_period
+                ),
             }
         )
 

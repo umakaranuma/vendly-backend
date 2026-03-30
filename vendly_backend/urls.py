@@ -51,6 +51,10 @@ from vendly_backend.controllers.admin_template_types_controller import (
     admin_template_types_view,
     template_types_public_view,
 )
+from vendly_backend.controllers.admin_plans_controller import (
+    admin_plans_view,
+    admin_plan_detail_view,
+)
 from vendly_backend.controllers.auth_controller import (
     admin_login_view,
     confirm_registration_otp,
@@ -244,4 +248,7 @@ urlpatterns = [
     # Admin: invitation template types
     path("api/admin/template-types", admin_template_types_view, name="admin_template_types"),
     path("api/admin/template-types/<int:type_id>", admin_template_type_detail_view, name="admin_template_type_detail"),
+    # Admin: subscription plans
+    path("api/admin/plans", admin_plans_view, name="admin_plans"),
+    path("api/admin/plans/<int:plan_id>", admin_plan_detail_view, name="admin_plan_detail"),
 ]

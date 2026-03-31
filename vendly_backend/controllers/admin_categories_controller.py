@@ -17,6 +17,7 @@ def _category_payload(category: Category) -> dict:
         "name": category.name,
         "slug": category.slug,
         "description": category.description,
+        "cover_image_url": category.cover_image_url,
         "sort_order": category.sort_order,
         "created_at": category.created_at,
         "updated_at": category.updated_at,
@@ -37,6 +38,7 @@ def admin_categories_view(request: Request) -> Response:
                     "categories.name",
                     "categories.slug",
                     "categories.description",
+                    "categories.cover_image_url",
                     "categories.sort_order",
                     "categories.created_at",
                     "categories.updated_at",
@@ -66,6 +68,7 @@ def admin_categories_view(request: Request) -> Response:
             name=name,
             slug=slug,
             description=description,
+            cover_image_url=data.get("cover_image_url"),
             sort_order=int(sort_order) if sort_order is not None else 0,
         )
     except IntegrityError:
@@ -121,6 +124,8 @@ def admin_category_detail_view(request: Request, category_id: int) -> Response:
 
         if "description" in data:
             category.description = data.get("description")
+        if "cover_image_url" in data:
+            category.cover_image_url = data.get("cover_image_url")
         if "sort_order" in data:
             category.sort_order = int(data.get("sort_order", 0))
 

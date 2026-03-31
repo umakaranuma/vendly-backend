@@ -51,6 +51,10 @@ from vendly_backend.controllers.admin_template_types_controller import (
     admin_template_types_view,
     template_types_public_view,
 )
+from vendly_backend.controllers.admin_plans_controller import (
+    admin_plans_view,
+    admin_plan_detail_view,
+)
 from vendly_backend.controllers.auth_controller import (
     admin_login_view,
     confirm_registration_otp,
@@ -64,6 +68,7 @@ from vendly_backend.controllers.vendor_controller import (
     public_vendor_detail_view,
     public_vendors_list_view,
     vendor_profile_view,
+    report_vendor_view,
 )
 from vendly_backend.controllers.feed_controller import list_posts, toggle_feed_like, post_comments, comment_like, vendor_follow
 from vendly_backend.controllers.bookings_controller import (
@@ -151,6 +156,7 @@ urlpatterns = [
     path("api/vendors/<int:vendor_id>", public_vendor_detail_view),
     path("api/vendors/<int:vendor_id>/favorite", favorite_vendor_view),
     path("api/vendors/<int:vendor_id>/follow", vendor_follow),
+    path("api/vendors/<int:vendor_id>/report", report_vendor_view),
 
     # Bookings
     path("api/bookings", bookings_list_view),
@@ -244,4 +250,7 @@ urlpatterns = [
     # Admin: invitation template types
     path("api/admin/template-types", admin_template_types_view, name="admin_template_types"),
     path("api/admin/template-types/<int:type_id>", admin_template_type_detail_view, name="admin_template_type_detail"),
+    # Admin: subscription plans
+    path("api/admin/plans", admin_plans_view, name="admin_plans"),
+    path("api/admin/plans/<int:plan_id>", admin_plan_detail_view, name="admin_plan_detail"),
 ]

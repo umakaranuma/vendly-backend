@@ -2,6 +2,7 @@ import os
 import json
 import re
 import requests
+import urllib.parse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -65,6 +66,19 @@ def _build_gemini_prompt(event_type, answers):
             buffer.append(f"- {display_key}: {value}")
             
     return "\n".join(buffer)
+
+def _build_image_prompt(event_type, json_data):
+    """
+    Builds a prompt for AI image generation (e.g. Pollinations.ai)
+    """
+    headline = json_data.get("headline", "")
+    tagline = json_data.get("tagline", "")
+    
+    # Create a descriptive prompt for the background art
+    # We want it to be artistic but leaving room for text in the middle
+    prompt = f"Professional luxury {event_type} invitation card background, {tagline}, {headline}, elegant, detailed, high resolution, centered composition with space for text, high-end design"
+    
+    return urllib.parse.quote(prompt)
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -134,6 +148,11 @@ def generate_invitation_content_view(request: Request) -> Response:
         json_data = _extract_json(raw_text)
         if not json_data:
              return ResponseService.response("INTERNAL_SERVER_ERROR", {"detail": "Failed to parse AI structure."}, "AI formatting error")
+        
+        # Add a generated background image URL
+        image_prompt = _build_image_prompt(event_type, json_data)
+        # Use Pollinations.ai for free, fast AI images
+        json_data["background_image_url"] = f"https://image.pollinations.ai/prompt/{image_prompt}?width=1024&height=1024&nologo=true&enhance=true"
              
         return ResponseService.response("SUCCESS", json_data, "Content generated successfully.")
 

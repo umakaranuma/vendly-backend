@@ -53,6 +53,11 @@ def _build_gemini_prompt(event_type, answers):
         "- body: 2-3 sentences, warm formal invitation text using the names, venue, and date",
         "- closing_line: warm sign-off (e.g. \"With love, The Silvas\")",
         "- tagline: 5-10 words, short catchy phrase (e.g. \"Join us as we celebrate love\")",
+        "- design_prompt: A 100-word design brief for an AI image generator. ",
+        "  Describe a professional PORTRAIT invitation card template for this event. ",
+        "  Specify elegant borders (e.g. floral, gold foil, watercolor frames). ",
+        "  Include proper icons (e.g. candles for birthdays, rings/flowers for weddings). ",
+        "  Crucially, request a HUGE BLANK CLEAN CENTER SPACE for text. Do NOT include any characters or text in the image.",
         "- Do NOT invent details not provided below.",
         "- Return ONLY the raw JSON object. No markdown, no explanation, no code fences.",
         "",
@@ -150,9 +155,11 @@ def generate_invitation_content_view(request: Request) -> Response:
              return ResponseService.response("INTERNAL_SERVER_ERROR", {"detail": "Failed to parse AI structure."}, "AI formatting error")
         
         # Add a generated background image URL
-        image_prompt = _build_image_prompt(event_type, json_data)
-        # Use Pollinations.ai for free, fast AI images
-        json_data["background_image_url"] = f"https://image.pollinations.ai/prompt/{image_prompt}?width=1024&height=1024&nologo=true&enhance=true"
+        design_prompt = json_data.get("design_prompt", _build_image_prompt(event_type, json_data))
+        encoded_prompt = urllib.parse.quote(design_prompt)
+        
+        # Use Flux model with Portrait dimensions (1024x1464)
+        json_data["background_image_url"] = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1464&nologo=true&enhance=true&model=flux"
              
         return ResponseService.response("SUCCESS", json_data, "Content generated successfully.")
 

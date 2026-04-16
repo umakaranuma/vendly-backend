@@ -88,7 +88,12 @@ from vendly_backend.controllers.messaging_controller import (
     message_detail_view,
 )
 
-from vendly_backend.controllers.invitations_controller import invitation_templates_view, invitations_view, invitation_detail_view
+from vendly_backend.controllers.invitations_controller import (
+    invitation_templates_view,
+    invitations_view,
+    invitation_detail_view,
+    generate_invitation_content_view,
+)
 from vendly_backend.controllers.categories_controller import categories_list_view, category_detail_view
 from vendly_backend.controllers.favorites_controller import favorites_list_view, favorite_vendor_view
 from vendly_backend.controllers.vendor_listings_controller import vendor_listings_view, vendor_listing_detail_view
@@ -179,6 +184,7 @@ urlpatterns = [
 
 
     # Invitations
+    path("api/invitations/generate-content", generate_invitation_content_view),
     path("api/invitations/templates", invitation_templates_view),
     path("api/invitations/template-types", template_types_public_view),
     path("api/invitations", invitations_view),

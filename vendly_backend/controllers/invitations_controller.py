@@ -1,3 +1,7 @@
+import os
+import json
+import re
+import requests
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -7,6 +11,134 @@ from rest_framework import status
 from mServices.ResponseService import ResponseService
 from mServices.QueryBuilderService import QueryBuilderService
 from vendly_backend.models import InvitationTemplate, Invitation
+
+def _extract_json(raw_text):
+    trimmed = raw_text.strip()
+    
+    # Try direct parse
+    try:
+        return json.loads(trimmed)
+    except:
+        pass
+        
+    # Strip markdown fences
+    fence_re = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')
+    match = fence_re.search(trimmed)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except:
+            pass
+            
+    # Find first { ... }
+    start = trimmed.find('{')
+    end = trimmed.rfind('}')
+    if start != -1 and end > start:
+        try:
+            return json.loads(trimmed[start:end+1])
+        except:
+            pass
+            
+    return {}
+
+def _build_gemini_prompt(event_type, answers):
+    buffer = [
+        f"You are an expert invitation writer. Generate beautiful, heartfelt, and elegant invitation text for a {event_type}.",
+        "Return a JSON object with EXACTLY these keys:",
+        "  headline, subheadline, body, closing_line, tagline",
+        "Rules:",
+        "- headline: 4-8 words, poetic opener (e.g. \"Two hearts, one forever\")",
+        "- subheadline: the event/couple name formatted nicely (e.g. \"John & Jane's Wedding\")",
+        "- body: 2-3 sentences, warm formal invitation text using the names, venue, and date",
+        "- closing_line: warm sign-off (e.g. \"With love, The Silvas\")",
+        "- tagline: 5-10 words, short catchy phrase (e.g. \"Join us as we celebrate love\")",
+        "- Do NOT invent details not provided below.",
+        "- Return ONLY the raw JSON object. No markdown, no explanation, no code fences.",
+        "",
+        "Event details:",
+        f"- Event type: {event_type}"
+    ]
+    
+    for key, value in answers.items():
+        if value and str(value).strip():
+            display_key = key.replace('_', ' ')
+            buffer.append(f"- {display_key}: {value}")
+            
+    return "\n".join(buffer)
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def generate_invitation_content_view(request: Request) -> Response:
+    try:
+        data = request.data
+        event_type = data.get("event_type", "Other event")
+        answers = data.get("answers", {})
+
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            return ResponseService.response("INTERNAL_SERVER_ERROR", {"detail": "Gemini API key not configured on server (or empty)."}, "Config error")
+
+        prompt = _build_gemini_prompt(event_type, answers)
+        
+        # List of models to try in order of likelihood of success/quota availability
+        # gemini-3.1-flash-lite-preview was verified as working in 2026 logs.
+        models = [
+            "gemini-3.1-flash-lite-preview",
+            "gemini-2.0-flash",
+            "gemini-flash-latest"
+        ]
+        
+        last_error = None
+        raw_text = None
+        
+        for model in models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                payload = {
+                    "contents": [{
+                        "parts": [{"text": prompt}]
+                    }],
+                    "generationConfig": {
+                        "temperature": 0.85,
+                        "topK": 40,
+                        "topP": 0.95,
+                        "maxOutputTokens": 1024,
+                    }
+                }
+                
+                response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=30)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    candidates = result.get("candidates", [])
+                    if candidates:
+                        raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                        if raw_text:
+                            break # Found success!
+                    
+                    last_error = "Empty AI response"
+                elif response.status_code == 429:
+                    last_error = f"Model {model} over quota (429)"
+                    continue # Try next model
+                else:
+                    last_error = f"Gemini API error ({response.status_code}): {response.text[:100]}"
+                    continue # Try next model
+            except Exception as e:
+                last_error = f"Request error for {model}: {str(e)}"
+                continue
+
+        if not raw_text:
+            msg = "AI services are currently busy or at capacity. Please try again in a few minutes or fill the template manually."
+            return ResponseService.response("INTERNAL_SERVER_ERROR", {"detail": last_error}, msg)
+
+        json_data = _extract_json(raw_text)
+        if not json_data:
+             return ResponseService.response("INTERNAL_SERVER_ERROR", {"detail": "Failed to parse AI structure."}, "AI formatting error")
+             
+        return ResponseService.response("SUCCESS", json_data, "Content generated successfully.")
+
+    except Exception as e:
+        return ResponseService.response("INTERNAL_SERVER_ERROR", {"error": str(e)}, "Server Error")
 
 @api_view(["GET"])
 
@@ -76,8 +208,13 @@ def invitations_view(request: Request) -> Response:
         invitation_type = data.get("invitation_type")
         event_type = data.get("event_type")
         answers = data.get("answers", {})
+        ai_content = data.get("ai_content")
         template_id = data.get("template_id")
         
+        # Merge AI content into answers for storage
+        if ai_content:
+            answers["ai_content"] = ai_content
+            
         if not invitation_type or not event_type:
             return ResponseService.response("BAD_REQUEST", {"detail": "invitation_type and event_type are required."}, "Validation error", status.HTTP_400_BAD_REQUEST)
             
